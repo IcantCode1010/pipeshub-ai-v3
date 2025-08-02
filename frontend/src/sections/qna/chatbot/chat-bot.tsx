@@ -685,33 +685,42 @@ const ChatInterface = () => {
     let currentEvent = '';
 
     const readNextChunk = async (): Promise<void> => {
-      const { done, value } = await reader.read();
-      if (done) return;
+      try {
+        const { done, value } = await reader.read();
+        if (done) return;
 
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n');
-      buffer = lines.pop() || '';
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
 
-      for (let i = 0; i < lines.length; i += 1) {
-        const line = lines[i];
-        const trimmedLine = line.trim();
-        // eslint-disable-next-line
-        if (!trimmedLine) continue;
-
-        const parsed = parseSSELineFunc(trimmedLine);
-        // eslint-disable-next-line
-        if (!parsed) continue;
-
-        if (parsed.event) {
-          currentEvent = parsed.event;
-        } else if (parsed.data && currentEvent) {
+        for (let i = 0; i < lines.length; i += 1) {
+          const line = lines[i];
+          const trimmedLine = line.trim();
           // eslint-disable-next-line
-          await handleStreamingEvent(currentEvent, parsed.data, context);
-        }
-      }
+          if (!trimmedLine) continue;
 
-      if (!controller.signal.aborted) {
-        await readNextChunk();
+          const parsed = parseSSELineFunc(trimmedLine);
+          // eslint-disable-next-line
+          if (!parsed) continue;
+
+          if (parsed.event) {
+            currentEvent = parsed.event;
+          } else if (parsed.data && currentEvent) {
+            // eslint-disable-next-line
+            await handleStreamingEvent(currentEvent, parsed.data, context);
+          }
+        }
+
+        if (!controller.signal.aborted) {
+          await readNextChunk();
+        }
+      } catch (error) {
+        // Handle read errors gracefully
+        if (!controller.signal.aborted) {
+          console.error('Error reading stream chunk:', error);
+          // Try to continue reading if possible
+          setTimeout(() => readNextChunk(), 100);
+        }
       }
     };
 
@@ -829,9 +838,16 @@ const ChatInterface = () => {
       };
 
       try {
-        // Make the HTTP request
+        // Make the HTTP request with timeout handling
         const token = localStorage.getItem('jwt_access_token');
-        const response = await fetch(url, {
+        
+        // Create a timeout promise for better error handling
+        const timeoutMs = 30000; // 30 seconds initial connection timeout
+        const timeoutPromise = new Promise((_, reject) => {
+          setTimeout(() => reject(new Error('Connection timeout')), timeoutMs);
+        });
+        
+        const fetchPromise = fetch(url, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -841,6 +857,9 @@ const ChatInterface = () => {
           body: JSON.stringify(body),
           signal: controller.signal,
         });
+        
+        // Race between fetch and timeout
+        const response = await Promise.race([fetchPromise, timeoutPromise]) as Response;
 
         if (!response.ok) {
           throw new Error(`HTTP error! status: ${response.status}`);

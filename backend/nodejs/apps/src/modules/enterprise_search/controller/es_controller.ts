@@ -1042,30 +1042,102 @@ export const addMessage =
           // Save the AI response to the existing conversation
           if (completeData && existingConversation) {
             try {
-              // Create and save citations
-              const savedCitations: ICitation[] = await Promise.all(
-                completeData.citations?.map(async (citation: ICitation) => {
-                  const newCitation = new Citation({
-                    content: citation.content,
-                    chunkIndex: citation.chunkIndex,
-                    citationType: citation.citationType,
-                    metadata: {
-                      ...citation.metadata,
-                      orgId,
-                    },
-                  });
-                  return newCitation.save();
-                }) || [],
-              );
+              // Create and save citations with better error handling
+              let savedCitations: ICitation[] = [];
+              try {
+                if (completeData.citations && Array.isArray(completeData.citations)) {
+                  savedCitations = await Promise.all(
+                    completeData.citations.map(async (citation: ICitation) => {
+                      try {
+                        const newCitation = new Citation({
+                          content: citation.content || '',
+                          chunkIndex: citation.chunkIndex || 0,
+                          citationType: citation.citationType || 'document',
+                          metadata: {
+                            ...citation.metadata,
+                            orgId,
+                          },
+                        });
+                        return await newCitation.save();
+                      } catch (citationError: any) {
+                        logger.warn('Failed to save individual citation', {
+                          requestId,
+                          citationError: citationError.message,
+                          citation: citation,
+                        });
+                        // Return a default citation structure if save fails
+                        return {
+                          content: citation.content || '',
+                          chunkIndex: citation.chunkIndex || 0,
+                          citationType: citation.citationType || 'document',
+                          metadata: {
+                            ...citation.metadata,
+                            orgId,
+                          },
+                        } as ICitation;
+                      }
+                    })
+                  );
+                }
+              } catch (citationsError: any) {
+                logger.warn('Failed to process citations', {
+                  requestId,
+                  citationsError: citationsError.message,
+                });
+                savedCitations = [];
+              }
 
-              // Build AI response message using existing utility
-              const aiResponseMessage = buildAIResponseMessage(
-                { statusCode: 200, data: completeData },
-                savedCitations,
-              ) as IMessageDocument;
+              // Log the complete data structure for debugging
+              logger.debug('Building AI response message', {
+                requestId,
+                completeDataStructure: {
+                  hasAnswer: !!completeData?.answer,
+                  hasReason: !!completeData?.reason,
+                  hasConfidence: !!completeData?.confidence,
+                  citationsCount: completeData?.citations?.length || 0,
+                  dataKeys: Object.keys(completeData || {}),
+                },
+              });
+
+              // Build AI response message using existing utility with fallback
+              let aiResponseMessage: IMessage;
+              try {
+                aiResponseMessage = buildAIResponseMessage(
+                  { statusCode: 200, data: completeData },
+                  savedCitations,
+                ) as IMessageDocument;
+              } catch (buildError: any) {
+                logger.warn('Failed to build AI response message, creating fallback', {
+                  requestId,
+                  buildError: buildError.message,
+                  completeData: completeData,
+                });
+                
+                // Create a fallback message if buildAIResponseMessage fails
+                aiResponseMessage = {
+                  messageType: 'bot_response',
+                  content: completeData?.answer || 'I apologize, but I encountered an issue processing the response.',
+                  contentFormat: 'MARKDOWN',
+                  confidence: 'Medium',
+                  citations: savedCitations.map((citation) => ({
+                    citationId: citation._id as mongoose.Types.ObjectId,
+                  })),
+                  followUpQuestions: [],
+                  metadata: {
+                    reason: 'Fallback response due to processing error',
+                  },
+                  createdAt: new Date(),
+                  updatedAt: new Date(),
+                };
+              }
+
+              // Validate the AI response message before adding to conversation
+              if (!aiResponseMessage || !aiResponseMessage.content) {
+                throw new Error('Invalid AI response message - missing content');
+              }
 
               // Add the AI message to the existing conversation
-              existingConversation.messages.push(aiResponseMessage);
+              existingConversation.messages.push(aiResponseMessage as IMessageDocument);
               existingConversation.lastActivityAt = Date.now();
               existingConversation.status = CONVERSATION_STATUS.COMPLETE;
 
@@ -1176,6 +1248,9 @@ export const addMessage =
             requestId,
             conversationId: existingConversation?._id,
             error: dbError.message,
+            stack: dbError.stack,
+            completeDataKeys: completeData ? Object.keys(completeData) : 'no completeData',
+            validationErrors: dbError.errors ? Object.keys(dbError.errors) : 'no validation errors',
           });
 
           // Send error event

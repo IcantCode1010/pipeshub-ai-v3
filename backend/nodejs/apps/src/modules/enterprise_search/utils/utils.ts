@@ -35,35 +35,81 @@ export const buildAIFailureResponseMessage = (): IMessage => ({
   updatedAt: new Date(),
 });
 
+// Type to handle both standard and legacy response formats
+type FlexibleAIResponse = AIServiceResponse<IAIResponse> | 
+  (Partial<IAIResponse> & { data?: Partial<IAIResponse> }) | 
+  string;
+
 export const buildAIResponseMessage = (
-  aiResponse: AIServiceResponse<IAIResponse>,
+  aiResponse: FlexibleAIResponse,
   citations: ICitation[] = [],
 ): IMessage => {
-  if (!aiResponse?.data?.answer) {
+  // Handle both old and new response formats
+  let answer = '';
+  let confidence = 'Medium';
+  let reason = '';
+  
+  // Check for answer in different possible locations
+  if (typeof aiResponse === 'object' && aiResponse && 'data' in aiResponse && aiResponse.data?.answer) {
+    answer = aiResponse.data.answer;
+  } else if (typeof aiResponse === 'object' && aiResponse && 'answer' in aiResponse && aiResponse.answer) {
+    answer = aiResponse.answer;
+  } else if (typeof aiResponse === 'string') {
+    answer = aiResponse;
+  } else {
     throw new InternalServerError('AI response must include an answer');
+  }
+
+  // Ensure answer is a non-empty string
+  if (!answer || typeof answer !== 'string' || answer.trim().length === 0) {
+    throw new InternalServerError('AI response answer must be a non-empty string');
+  }
+
+  // Extract confidence with fallback and validation
+  if (typeof aiResponse === 'object' && aiResponse && 'data' in aiResponse && aiResponse.data?.confidence) {
+    confidence = aiResponse.data.confidence;
+  } else if (typeof aiResponse === 'object' && aiResponse && 'confidence' in aiResponse && aiResponse.confidence) {
+    confidence = aiResponse.confidence;
+  }
+  
+  // Ensure confidence matches schema requirements
+  const validConfidences = ['Very High', 'High', 'Medium', 'Low', 'Unknown'];
+  if (!validConfidences.includes(confidence)) {
+    confidence = 'Medium'; // Default fallback
+  }
+
+  // Extract reason with fallback
+  if (typeof aiResponse === 'object' && aiResponse && 'data' in aiResponse && aiResponse.data?.reason) {
+    reason = aiResponse.data.reason;
+  } else if (typeof aiResponse === 'object' && aiResponse && 'reason' in aiResponse && aiResponse.reason) {
+    reason = aiResponse.reason;
   }
 
   return {
     messageType: 'bot_response',
     createdAt: new Date(),
     updatedAt: new Date(),
-    content: aiResponse.data.answer,
+    content: answer,
     contentFormat: 'MARKDOWN',
     citations: citations.map((citation) => ({
       citationId: citation._id as mongoose.Types.ObjectId,
     })),
-    confidence: aiResponse.data.confidence,
+    confidence: confidence,
     followUpQuestions:
-      aiResponse.data.followUpQuestions?.map((q) => ({
+      (typeof aiResponse === 'object' && aiResponse && 'data' in aiResponse && 
+       aiResponse.data?.followUpQuestions?.map((q) => ({
         question: q.question,
         confidence: q.confidence,
         reasoning: q.reasoning,
-      })) || [],
+      }))) || [],
     metadata: {
-      processingTimeMs: aiResponse.data.metadata?.processingTimeMs,
-      modelVersion: aiResponse.data.metadata?.modelVersion,
-      aiTransactionId: aiResponse.data.metadata?.aiTransactionId,
-      reason: aiResponse.data?.reason,
+      processingTimeMs: typeof aiResponse === 'object' && aiResponse && 'data' in aiResponse ? 
+        aiResponse.data?.metadata?.processingTimeMs : undefined,
+      modelVersion: typeof aiResponse === 'object' && aiResponse && 'data' in aiResponse ? 
+        aiResponse.data?.metadata?.modelVersion : undefined,
+      aiTransactionId: typeof aiResponse === 'object' && aiResponse && 'data' in aiResponse ? 
+        aiResponse.data?.metadata?.aiTransactionId : undefined,
+      reason: reason,
     },
   };
 };

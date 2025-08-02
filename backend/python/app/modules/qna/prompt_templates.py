@@ -6,14 +6,14 @@ from pydantic import BaseModel
 class AnswerWithMetadata(BaseModel):
     """Schema for the answer with metadata"""
     answer: str
-    reason: str
-    confidence: Literal["Very High", "High", "Medium", "Low"]
-    answerMatchType: Literal["Derived From Chunks", "Exact Match", "Fuzzy Match", "Inferred", "Other"]
-    chunkIndexes: List[int]
+    reason: str = ""  # Make optional with default empty string
+    confidence: Literal["Very High", "High", "Medium", "Low"] = "Medium"  # Add default
+    answerMatchType: Literal["Derived From Chunks", "Exact Match", "Fuzzy Match", "Inferred", "Other"] = "Derived From Chunks"  # Add default
+    chunkIndexes: List[int] = []  # Make optional with default empty list
 
 qna_prompt = """
 <task>
-  You are an expert AI assistant within an enterprise who can answer any question person in the company has based on companies Knowledge sources and user information.
+  You are an expert question-answering assistant. Your goal is to synthesize information from multiple documents, avoid repeating the same facts, and highlight any important differences or uncertainties. Cite your sources clearly.
   Records could be from multiple connector apps like a Slack message record, Mail record, Google Drive File record, etc
   Answer the user's queries based on the provided context (records), user information, and maintain a coherent conversational flow using prior exchanges.
   Ensure that document records only influence the current question and not subsequent **unrelated** follow-up questions.

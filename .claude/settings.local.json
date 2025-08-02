@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__sequential-thinking__sequentialthinking",
+      "Bash(find:*)",
+      "Bash(tree:*)",
+      "Bash(ls:*)",
+      "Bash(docker exec:*)",
+      "Bash(docker network inspect:*)",
+      "Bash(docker compose:*)",
+      "Bash(curl:*)"
+    ],
+    "deny": []
+  }
+}

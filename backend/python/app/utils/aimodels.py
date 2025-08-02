@@ -257,13 +257,17 @@ def get_generator_model(provider: str, config: Dict[str, Any]) -> BaseChatModel:
     elif provider == LLMProvider.GEMINI.value:
         from langchain_google_genai import ChatGoogleGenerativeAI
 
+        # Add specific timeout and retry settings for Gemini 2.5 Flash
+        timeout_val = 120 if "flash" in configuration["model"].lower() else 60
+        
         return ChatGoogleGenerativeAI(
                 model=configuration["model"],
                 temperature=0.2,
                 max_tokens=None,
-                timeout=None,
-                max_retries=2,
+                timeout=timeout_val,
+                max_retries=3,  # Increased retries for better reliability
                 google_api_key=configuration["apiKey"],
+                convert_system_message_to_human=True,  # Better compatibility
             )
 
     elif provider == LLMProvider.GROQ.value:

@@ -223,9 +223,16 @@ async def askAIStream(
                 chunks=final_results,
             )
 
-            messages = [
-                {"role": "system", "content": "You are a enterprise questions answering expert"}
-            ]
+            # Check if using Gemini model and adjust message format
+            is_gemini = hasattr(llm, '_llm_type') and 'gemini' in str(llm._llm_type).lower()
+            
+            if is_gemini:
+                # Gemini works better with human/assistant roles
+                messages = []
+            else:
+                messages = [
+                    {"role": "system", "content": "You are a enterprise questions answering expert"}
+                ]
 
             # Add conversation history
             for conversation in query_info.previousConversations:
@@ -400,12 +407,19 @@ async def askAI(
             chunks=final_results,
         )
 
-        messages = [
-            {
-                "role": "system",
-                "content": "You are a enterprise questions answering expert",
-            }
-        ]
+        # Check if using Gemini model and adjust message format
+        is_gemini = hasattr(llm, '_llm_type') and 'gemini' in str(llm._llm_type).lower()
+        
+        if is_gemini:
+            # Gemini works better with human/assistant roles
+            messages = []
+        else:
+            messages = [
+                {
+                    "role": "system",
+                    "content": "You are a enterprise questions answering expert",
+                }
+            ]
 
         # Add conversation history
         for conversation in query_info.previousConversations:

@@ -36,9 +36,25 @@ def escape_ctl(raw: str) -> str:
 async def aiter_llm_stream(llm, messages) -> AsyncGenerator[str, None]:
     """Async iterator for LLM streaming"""
     if hasattr(llm, "astream"):
-        async for part in llm.astream(messages):
-            if part and getattr(part, "content", ""):
-                yield part.content
+        try:
+            async for part in llm.astream(messages):
+                if part:
+                    # Handle different response formats from various LLM providers
+                    content = None
+                    if hasattr(part, "content") and part.content:
+                        content = part.content
+                    elif isinstance(part, dict) and "content" in part:
+                        content = part["content"]
+                    elif isinstance(part, str):
+                        content = part
+                    
+                    if content:
+                        yield content
+        except Exception as e:
+            # Fallback to non-streaming if streaming fails
+            print(f"Streaming failed, falling back to non-streaming: {e}")
+            response = await llm.ainvoke(messages)
+            yield getattr(response, "content", str(response))
     else:
         # Non-streaming – yield whole blob once
         response = await llm.ainvoke(messages)
@@ -66,10 +82,16 @@ async def stream_llm_response(
     prev_norm_len = 0  # length of the previous normalised answer
     emit_upto = 0
     words_in_chunk = 0
+    # Check if the LLM supports structured output
+    supports_structured_output = False
     try:
-        llm.with_structured_output(AnswerWithMetadata)
-    except NotImplementedError as e:
-        print(f"LLM provider or api does not support structured output: {e}")
+        # Only use structured output if the LLM explicitly supports it
+        if hasattr(llm, "with_structured_output"):
+            test_llm = llm.with_structured_output(AnswerWithMetadata)
+            supports_structured_output = True
+    except (NotImplementedError, AttributeError) as e:
+        print(f"LLM provider does not support structured output: {e}")
+        supports_structured_output = False
 
     try:
         async for token in aiter_llm_stream(llm, messages):
@@ -122,30 +144,34 @@ async def stream_llm_response(
                             },
                         }
 
-        try:
-            parsed = json.loads(escape_ctl(full_json_buf))
-            final_answer = parsed.get("answer", answer_buf)
-            normalized, c = normalize_citations_and_chunks(final_answer, final_results)
-            yield {
-                "event": "complete",
-                "data": {
-                    "answer": normalized,
-                    "citations": c,
-                    "reason": parsed.get("reason"),
-                    "confidence": parsed.get("confidence"),
-                },
-            }
-        except Exception:
-            normalized, c = normalize_citations_and_chunks(answer_buf, final_results)
-            yield {
-                "event": "complete",
-                "data": {
-                    "answer": normalized,
-                    "citations": c,
-                    "reason": None,
-                    "confidence": None,
-                },
-            }
+        # Try to parse as JSON first, then fallback to plain text
+        parsed_data = None
+        final_answer = answer_buf
+        
+        # Attempt JSON parsing if we have what looks like JSON
+        if full_json_buf.strip().startswith('{'):
+            try:
+                parsed_data = json.loads(escape_ctl(full_json_buf))
+                final_answer = parsed_data.get("answer", answer_buf)
+            except Exception:
+                # JSON parsing failed, use accumulated answer buffer
+                pass
+        
+        # If we didn't get any answer content, use the full buffer as plain text
+        if not final_answer and full_json_buf:
+            final_answer = full_json_buf.strip()
+            
+        normalized, c = normalize_citations_and_chunks(final_answer, final_results)
+        
+        yield {
+            "event": "complete",
+            "data": {
+                "answer": normalized,
+                "citations": c,
+                "reason": parsed_data.get("reason") if parsed_data else None,
+                "confidence": parsed_data.get("confidence") if parsed_data else None,
+            },
+        }
 
     except Exception as exc:
         yield {
