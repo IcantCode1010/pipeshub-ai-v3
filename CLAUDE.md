@@ -17,39 +17,53 @@ PipesHub is a workplace AI platform built with a modular microservices architect
 - **Redis**: Caching, session management, and real-time data
 - **Kafka**: Event streaming between services
 - **Qdrant**: Vector database for embeddings and semantic search
+- **MongoDB**: User data, conversations, and business logic storage
 
 ### AI Pipeline Architecture
 The AI service follows a retrieval-augmented generation (RAG) pattern:
-1. **Ingestion**: Documents from connectors � parsing � chunking � embedding
+1. **Ingestion**: Documents from connectors → parsing → chunking → embedding
 2. **Indexing**: Vector storage in Qdrant + metadata in ArangoDB
-3. **Retrieval**: Hybrid search (semantic + keyword) � reranking � context assembly
+3. **Retrieval**: Hybrid search (semantic + keyword) → reranking → context assembly
 4. **Generation**: LLM inference with streaming responses and citation tracking
+
+### Multi-Provider AI Support
+The platform supports 15+ LLM providers through a unified interface:
+- **OpenAI**: GPT-4, GPT-3.5 models
+- **Anthropic**: Claude 3.5 Sonnet, Claude 3 Haiku/Opus
+- **Google**: Gemini 1.5 Pro/Flash, Vertex AI
+- **AWS Bedrock**: Claude, Titan models
+- **Others**: Cohere, Mistral, Groq, Fireworks, Together, xAI, Ollama
+- **Embedding models**: OpenAI, Voyage, JinaAI, Mistral, Cohere, local models
 
 ## Development Commands
 
 ### Frontend (React/TypeScript)
 ```bash
 cd frontend
-yarn dev                # Development server
+yarn dev                # Development server at localhost:3000
+yarn dev:host          # Development server accessible on network
 yarn build             # Production build
 yarn lint              # ESLint check
 yarn lint:fix          # Fix linting issues
 yarn fm:check          # Prettier format check
 yarn fm:fix            # Fix formatting
+yarn re:start          # Clean reinstall and dev
+yarn re:build          # Clean reinstall and build
 ```
 
 ### Backend Python (AI Service)
 ```bash
 cd backend/python
-# No pip/poetry commands - uses Docker
+# No pip/poetry commands - uses Docker exclusively
 ruff check .           # Lint check
 ruff format .          # Format code
+# Note: Python service runs on ports 8000 (query), 8091 (indexing), 8088 (connectors)
 ```
 
 ### Backend Node.js
 ```bash
 cd backend/nodejs/apps
-npm run dev            # Development with nodemon
+npm run dev            # Development with nodemon (port 3001)
 npm run build          # TypeScript compilation
 npm run lint           # ESLint check
 npm run format         # Prettier formatting
@@ -60,7 +74,7 @@ npm test               # Run Mocha tests
 ```bash
 cd deployment/docker-compose
 
-# Development build (with source mounting)
+# Development build (with source mounting and hot reload)
 docker compose -f docker-compose.dev.yml -p pipeshub-ai up --build -d
 
 # Production deployment
@@ -68,7 +82,23 @@ docker compose -f docker-compose.prod.yml -p pipeshub-ai up -d
 
 # Stop services
 docker compose -f docker-compose.dev.yml -p pipeshub-ai down
+
+# View logs
+docker compose -f docker-compose.dev.yml -p pipeshub-ai logs -f [service-name]
+
+# Ollama development (for local LLM testing)
+docker compose -f docker-compose.ollama-dev.yml -p pipeshub-ai up -d
 ```
+
+### Service Ports
+- **Frontend**: 3000
+- **Backend Node.js**: 3001 (internal)
+- **Python AI Service**: 8000 (query), 8091 (indexing), 8088 (connectors)
+- **ArangoDB**: 8529
+- **MongoDB**: 27017
+- **Redis**: 6379
+- **Qdrant**: 6333 (HTTP), 6334 (gRPC)
+- **Kafka**: 9092
 
 ## Code Architecture
 
@@ -194,6 +224,55 @@ Refer to `env.template` files in each service directory for complete configurati
 4. **Schema changes**: Update both TypeScript interfaces and MongoDB schemas
 
 ### Key Configuration Files
-- `backend/python/app/utils/aimodels.py`: LLM provider configurations
-- `backend/nodejs/apps/src/modules/enterprise_search/schema/`: MongoDB schemas
-- `deployment/docker-compose/`: Development and production environments
+- `backend/python/app/utils/aimodels.py`: LLM provider configurations and model mappings
+- `backend/nodejs/apps/src/modules/enterprise_search/schema/`: MongoDB schemas for conversations and messages
+- `deployment/docker-compose/`: Development and production Docker environments
+- `env.template` files: Environment variable templates in each service directory
+- `frontend/src/config-global.ts`: Frontend configuration constants
+- `backend/python/pyproject.toml`: Python dependencies and build configuration
+
+## Project Structure Patterns
+
+### Frontend Architecture
+- **src/sections/**: Feature-based organization (qna, knowledgebase, accountdetails)
+- **src/components/**: Reusable UI components with TypeScript interfaces
+- **src/hooks/**: Custom React hooks for shared logic
+- **src/store/**: Redux Toolkit slices for global state
+- **src/types/**: TypeScript type definitions for API interfaces
+
+### Backend Python Structure
+- **app/api/routes/**: FastAPI route handlers (chatbot.py, search.py, records.py)
+- **app/modules/**: Business logic modules (indexing, retrieval, streaming)
+- **app/utils/**: Utility functions (aimodels.py, streaming.py, citations.py)
+- **app/connectors/**: Source system integrations (Google Drive, Gmail, etc.)
+- **app/models/**: Pydantic models and database schemas
+
+### Backend Node.js Structure
+- **src/modules/enterprise_search/**: Main search and chat functionality
+- **src/modules/enterprise_search/controller/**: API controllers (es_controller.ts)
+- **src/modules/enterprise_search/schema/**: Mongoose schemas (conversation.schema.ts)
+- **src/modules/enterprise_search/utils/**: Helper functions (utils.ts)
+
+## Testing and Development Workflow
+
+### Frontend Testing
+```bash
+cd frontend
+# Component testing with React Testing Library (when available)
+yarn test              # Run tests
+yarn test:watch        # Watch mode
+```
+
+### Backend Testing
+```bash
+cd backend/nodejs/apps
+npm test               # Mocha tests with Sinon mocking
+npm run test:watch     # Watch mode
+```
+
+### Development Workflow
+1. **Environment Setup**: Copy env.template files and configure API keys
+2. **Docker Development**: Use docker-compose.dev.yml for full stack development
+3. **Service Development**: Individual services can be developed outside Docker for faster iteration
+4. **Database Management**: ArangoDB and MongoDB GUIs available on respective ports
+5. **Log Monitoring**: Use docker compose logs for debugging across services

@@ -173,6 +173,7 @@ export const addComputedFields = (
 ) => {
   return {
     ...conversation,
+    id: (conversation as any)._id?.toString() || (conversation as any).id,
     isOwner: conversation.initiator.toString() === userId,
     accessLevel:
       conversation.sharedWith?.find(
