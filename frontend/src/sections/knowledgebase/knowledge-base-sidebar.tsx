@@ -46,7 +46,7 @@ import {
 } from '@mui/material';
 
 import type { Modules } from './types/modules';
-import type { Departments } from './types/departments';
+import type { Aircraft } from './types/aircraft';
 import type { SearchTagsRecords } from './types/search-tags';
 import type { RecordCategories } from './types/record-categories';
 import type { Filters, FilterHeaderProps, KnowledgeBaseSideBarProps } from './types/knowledge-base';
@@ -386,7 +386,7 @@ const formatLabel = (label: string): string => {
 // Helper function to create empty filters object
 const createEmptyFilters = (): Filters => ({
   indexingStatus: [],
-  department: [],
+  aircraft: [],
   moduleId: [],
   searchTags: [],
   appSpecificRecordType: [],
@@ -409,7 +409,7 @@ export default function KnowledgeBaseSideBar({
   const { pathname } = useLocation();
   const navigate = useNavigate();
   const [open, setOpen] = useState<boolean>(true);
-  const [departments, setDepartments] = useState<Departments[]>([]);
+  const [aircraft, setAircraft] = useState<Aircraft[]>([]);
   const [recordCategories, setRecordCategories] = useState<RecordCategories[]>([]);
   const [modules, setModules] = useState<Modules[]>([]);
   const [tags, setTags] = useState<SearchTagsRecords[]>([]);
@@ -421,7 +421,7 @@ export default function KnowledgeBaseSideBar({
     origin: false,
     connector: false,
     permissions: false,
-    departments: false,
+    aircraft: false,
     modules: false,
     tags: false,
     categories: false,
@@ -533,7 +533,7 @@ export default function KnowledgeBaseSideBar({
   const activeCounts = useMemo(() => {
     const counts: Record<keyof Filters, number> = {
       indexingStatus: 0,
-      department: 0,
+      aircraft: 0,
       moduleId: 0,
       searchTags: 0,
       appSpecificRecordType: 0,
@@ -704,8 +704,8 @@ export default function KnowledgeBaseSideBar({
   // Get filter item names by IDs
   const getFilterName = (type: keyof Filters, id: string): string => {
     switch (type) {
-      case 'department':
-        return departments.find((d) => d._id === id)?.name || id;
+      case 'aircraft':
+        return aircraft.find((a) => a._id === id)?.name || id;
       case 'moduleId':
         return modules.find((m) => m._id === id)?.name || id;
       case 'searchTags':

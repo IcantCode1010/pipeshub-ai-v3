@@ -1,31 +1,59 @@
 from enum import Enum
 
 
-class DepartmentNames(Enum):
-    LEGAL = "Legal"
-    COMPLIANCE_RISK = "Compliance/Risk Management"
-    IT_SECURITY = "IT & Security"
-    PRODUCT_MANAGEMENT = "Product Management"
-    SALES = "Sales"
-    ENGINEERING = "Engineering/Technology"
-    HR = "Human Resources"
-    PROCUREMENT = "Procurement"
-    FINANCE = "Finance"
-    OPERATIONS = "Operations"
-    RND = "Research and Development"
-    EXECUTIVE = "Executive Leadership"
-    QA = "Quality Assurance"
-    DEVOPS = "Devops/Site Reliability Engineering"
-    LEGAL_PATENT = "Legal/Patent Management"
-    FACILITIES_ADMIN = "Facilities / Administration"
-    DATA_ANALYTICS = "Data Analytics / Insights"
-    BUSINESS_DEV = "Business Development / Partnerships"
-    ESG = "Environmental, Social, and Governance"
-    TRAINING = "Training and Enablement"
-    MARKETING = "Marketing"
-    INVESTOR_RELATIONS = "Investor Relations"
-    CUSTOMER_SUCCESS = "Customer Success"
-    OTHERS = "Others"
+class AircraftNames(Enum):
+    # Boeing Aircraft
+    BOEING_737 = "Boeing 737"
+    BOEING_737_700 = "Boeing 737-700"
+    BOEING_737_800 = "Boeing 737-800"
+    BOEING_737_900 = "Boeing 737-900"
+    BOEING_737_MAX = "Boeing 737 MAX"
+    BOEING_747 = "Boeing 747"
+    BOEING_747_8 = "Boeing 747-8"
+    BOEING_757 = "Boeing 757"
+    BOEING_767 = "Boeing 767"
+    BOEING_777 = "Boeing 777"
+    BOEING_777_200 = "Boeing 777-200"
+    BOEING_777_300 = "Boeing 777-300"
+    BOEING_777X = "Boeing 777X"
+    BOEING_787 = "Boeing 787"
+    BOEING_787_8 = "Boeing 787-8"
+    BOEING_787_9 = "Boeing 787-9"
+    BOEING_787_10 = "Boeing 787-10"
+    
+    # Airbus Aircraft
+    AIRBUS_A220 = "Airbus A220"
+    AIRBUS_A300 = "Airbus A300"
+    AIRBUS_A310 = "Airbus A310"
+    AIRBUS_A318 = "Airbus A318"
+    AIRBUS_A319 = "Airbus A319"
+    AIRBUS_A320 = "Airbus A320"
+    AIRBUS_A321 = "Airbus A321"
+    AIRBUS_A330 = "Airbus A330"
+    AIRBUS_A330_200 = "Airbus A330-200"
+    AIRBUS_A330_300 = "Airbus A330-300"
+    AIRBUS_A340 = "Airbus A340"
+    AIRBUS_A350 = "Airbus A350"
+    AIRBUS_A350_900 = "Airbus A350-900"
+    AIRBUS_A350_1000 = "Airbus A350-1000"
+    AIRBUS_A380 = "Airbus A380"
+    
+    # Embraer Aircraft
+    EMBRAER_E170 = "Embraer E170"
+    EMBRAER_E175 = "Embraer E175"
+    EMBRAER_E190 = "Embraer E190"
+    EMBRAER_E195 = "Embraer E195"
+    
+    # Bombardier Aircraft
+    BOMBARDIER_CRJ = "Bombardier CRJ"
+    BOMBARDIER_Q400 = "Bombardier Q400"
+    
+    # Other Aircraft
+    ATR_42 = "ATR 42"
+    ATR_72 = "ATR 72"
+    
+    # Generic/Unknown
+    UNKNOWN = "Unknown Aircraft"
 
 
 class Connectors(Enum):
@@ -92,9 +120,9 @@ class CollectionNames(Enum):
     ANYONE = "anyone"
     BELONGS_TO = "belongsTo"
 
-    # Departments
-    DEPARTMENTS = "departments"
-    BELONGS_TO_DEPARTMENT = "belongsToDepartment"
+    # Aircraft
+    AIRCRAFT = "aircraft"
+    BELONGS_TO_AIRCRAFT = "belongsToAircraft"
     CATEGORIES = "categories"
     BELONGS_TO_CATEGORY = "belongsToCategory"
     LANGUAGES = "languages"
@@ -119,7 +147,7 @@ class CollectionNames(Enum):
     APPS = "apps"
     ORG_APP_RELATION = "orgAppRelation"
     USER_APP_RELATION = "userAppRelation"
-    ORG_DEPARTMENT_RELATION = "orgDepartmentRelation"
+    ORG_AIRCRAFT_RELATION = "orgAircraftRelation"
 
     BLOCKS = "blocks"
 

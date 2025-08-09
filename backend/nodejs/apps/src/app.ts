@@ -377,12 +377,12 @@ export class Application {
     try {
       // Create the Swagger configuration
       const swaggerConfig: SwaggerConfig = {
-        title: 'PipesHub API',
+        title: 'Aerointel Solutions API',
         version: '1.0.0',
-        description: 'RESTful API for PipesHub services',
+        description: 'RESTful API for Aerointel Solutions services',
         contact: {
           name: 'API Support',
-          email: 'contact@pipeshub.com',
+          email: 'contact@aerointelsolutions.com',
         },
         basePath: '/api-docs',
       };

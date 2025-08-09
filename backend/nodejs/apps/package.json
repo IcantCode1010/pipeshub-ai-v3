@@ -26,6 +26,7 @@
     "@types/multer": "^1.4.12",
     "@types/node": "^22.10.2",
     "@types/passport": "^1.0.17",
+    "@types/reflect-metadata": "^0.0.5",
     "@types/sinon": "^17.0.3",
     "@types/slug": "^5.0.9",
     "@types/swagger-jsdoc": "^6.0.4",

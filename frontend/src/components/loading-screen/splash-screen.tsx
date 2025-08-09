@@ -46,8 +46,8 @@ export function SplashScreen({ portal = true, sx, ...other }: Props) {
       >
         <Box
           component="img"
-          src="/logo/logo-full.svg"
-          alt="Logo"
+          src="/logo/AeroIntel Logo Symbol 2400x1800.png"
+          alt="Aerointel Solutions Logo"
           sx={{
             width: { xs: 180, sm: 240, md: 300 },
             height: 'auto',

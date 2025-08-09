@@ -2846,26 +2846,77 @@ export class RecordRelationService {
         throw new NotFoundError(`Record with ID ${recordId} not found`);
       }
 
-      // Update the record to set deleted flag
-      const updateData = {
+      // Handle stuck IN_PROGRESS records
+      const recordUpdateData: any = {
         isDeleted: true,
         deletedByUserId: userId,
-        // deletedAtTimestamp: Date.now(),
+        deletedAtTimestamp: Date.now(),
         updatedAtTimestamp: Date.now(),
       };
 
-      await this.recordCollection.update(recordId, updateData);
+      // Minimal file update payload to avoid schema validation issues on 'files' collection
+      const fileUpdateData: any = {
+        // isDeleted may not be allowed in 'files' schema; update timestamp only
+        updatedAtTimestamp: Date.now(),
+      };
 
-      // Also mark the file record as deleted if it exists
+      // If record is stuck in IN_PROGRESS status, reset it to allow deletion
+      if (record.indexingStatus === 'IN_PROGRESS') {
+        logger.warn('Record is stuck in IN_PROGRESS status, resetting for deletion', { 
+          recordId, 
+          previousStatus: record.indexingStatus,
+          stuckReason: record.indexingStatusReason || 'Unknown' 
+        });
+        
+        recordUpdateData.indexingStatus = 'FAILED';
+        recordUpdateData.indexingStatusReason = 'Deletion requested while processing - marking as failed';
+        recordUpdateData.indexingCompletedAtTimestamp = Date.now();
+      }
+
+      try {
+        await this.recordCollection.update(recordId, recordUpdateData);
+      } catch (err: any) {
+        // Retry with minimal payload if schema validation fails (1620)
+        if (err && err.errorNum === 1620) {
+          logger.warn('Schema validation failed on records update; retrying with minimal payload', {
+            recordId,
+            errorNum: err.errorNum,
+            code: err.code,
+          });
+          const minimalRecordUpdate = {
+            isDeleted: true,
+            updatedAtTimestamp: Date.now(),
+          };
+          await this.recordCollection.update(recordId, minimalRecordUpdate);
+        } else {
+          throw err;
+        }
+      }
+
+      // Also update the file record if it exists (best-effort, minimal payload)
       try {
         const fileRecord = await this.fileRecordCollection.document(recordId);
         if (fileRecord) {
-          await this.fileRecordCollection.update(recordId, updateData);
-          logger.info('Associated file record marked as deleted', { recordId });
+          try {
+            // First try minimal timestamp update
+            await this.fileRecordCollection.update(recordId, fileUpdateData);
+            logger.info('Associated file record timestamp updated', { recordId });
+          } catch (fileErr: any) {
+            if (fileErr && fileErr.errorNum === 1620) {
+              // As a last resort, if schema rejects even minimal update, skip updating files
+              logger.warn('Files schema rejected update; skipping file record soft delete', {
+                recordId,
+                errorNum: fileErr.errorNum,
+                code: fileErr.code,
+              });
+            } else {
+              throw fileErr;
+            }
+          }
         }
       } catch (error) {
-        // Ignore errors if file record doesn't exist
-        logger.debug('No associated file record found for deletion', {
+        // Ignore errors if file record doesn't exist or update not allowed by schema
+        logger.debug('No associated file record found or update skipped due to schema', {
           recordId,
         });
       }
@@ -2987,6 +3038,132 @@ export class RecordRelationService {
         error: error,
       });
 
+      throw error;
+    }
+  }
+
+  /**
+   * Reset stuck IN_PROGRESS records to allow deletion or reprocessing
+   * @param options Configuration options for resetting stuck records
+   * @returns Result with affected record count and details
+   */
+  async resetStuckRecords(options: {
+    orgId: string;
+    recordIds?: string[];
+    stuckHours?: number;
+    newStatus?: string;
+    dryRun?: boolean;
+    userId: string;
+  }): Promise<{
+    affectedRecords: number;
+    recordDetails?: Array<{
+      recordId: string;
+      recordName: string;
+      previousStatus: string;
+      stuckDuration: number;
+      updatedAt: number;
+    }>;
+  }> {
+    const {
+      orgId,
+      recordIds,
+      stuckHours = 4,
+      newStatus = 'FAILED',
+      dryRun = false,
+      userId,
+    } = options;
+
+    try {
+      logger.info('Processing stuck records reset', {
+        orgId,
+        recordIds: recordIds?.length || 'all',
+        stuckHours,
+        newStatus,
+        dryRun,
+        userId,
+      });
+
+      // Calculate stuck threshold timestamp
+      const stuckThreshold = Date.now() - (stuckHours * 60 * 60 * 1000);
+
+      // Build query to find stuck records
+      let query = `
+        FOR record IN records
+          FILTER record.orgId == @orgId
+          AND record.indexingStatus == "IN_PROGRESS"
+          AND record.updatedAtTimestamp < @stuckThreshold
+          AND record.isDeleted != true
+      `;
+
+      let bindVars: any = {
+        orgId,
+        stuckThreshold,
+        newStatus,
+        currentTimestamp: Date.now(),
+        userId,
+      };
+
+      // Filter by specific record IDs if provided
+      if (recordIds && recordIds.length > 0) {
+        query += ` AND record._key IN @recordIds`;
+        bindVars.recordIds = recordIds;
+      }
+
+      if (dryRun) {
+        query += `
+          RETURN {
+            recordId: record._key,
+            recordName: record.recordName,
+            previousStatus: record.indexingStatus,
+            stuckDuration: @currentTimestamp - record.updatedAtTimestamp,
+            indexingStatusReason: record.indexingStatusReason
+          }
+        `;
+      } else {
+        query += `
+          UPDATE record WITH {
+            indexingStatus: @newStatus,
+            indexingStatusReason: CONCAT("Reset from IN_PROGRESS by ", @userId, " due to being stuck for ", FLOOR((@currentTimestamp - record.updatedAtTimestamp) / 3600000), " hours"),
+            indexingCompletedAtTimestamp: @currentTimestamp,
+            updatedAtTimestamp: @currentTimestamp
+          } IN records
+          RETURN {
+            recordId: OLD._key,
+            recordName: OLD.recordName,
+            previousStatus: OLD.indexingStatus,
+            stuckDuration: @currentTimestamp - OLD.updatedAtTimestamp,
+            updatedAt: @currentTimestamp
+          }
+        `;
+      }
+
+      const cursor = await this.db.query(query, bindVars);
+      const results = await cursor.all();
+
+      logger.info(`${dryRun ? 'Found' : 'Reset'} ${results.length} stuck records`, {
+        orgId,
+        stuckHours,
+        newStatus,
+        dryRun,
+        userId,
+      });
+
+      return {
+        affectedRecords: results.length,
+        recordDetails: results.map((result: any) => ({
+          recordId: result.recordId,
+          recordName: result.recordName || 'Unknown',
+          previousStatus: result.previousStatus,
+          stuckDuration: Math.round(result.stuckDuration / (60 * 60 * 1000)), // Convert to hours
+          updatedAt: result.updatedAt || Date.now(),
+        })),
+      };
+    } catch (error) {
+      logger.error('Error resetting stuck records', {
+        orgId,
+        error,
+        userId,
+      });
       throw error;
     }
   }

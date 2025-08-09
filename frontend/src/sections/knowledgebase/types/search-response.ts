@@ -3,10 +3,13 @@ export interface BoundingBox {
   y: number;
 }
 
-export interface Department {
+export interface Aircraft {
   _id: string;
   name: string;
 }
+
+// Keep alias for backward compatibility during migration
+export interface Department extends Aircraft {}
 
 export interface AppSpecificRecordType {
   _id: string;
@@ -25,7 +28,7 @@ export interface DocumentMetadata {
   subcategoryLevel2: string;
   subcategoryLevel3: string;
   categories: string;
-  departments: string[];
+  aircraft: string;
   connector: string;
   recordType: string;
   blockType: number;
@@ -56,7 +59,7 @@ export interface AggregatedDocument {
   documents: DocumentContent[];
 }
 
-export namespace PipesHub {
+export namespace Aerointel {
   export interface Record {
     _key: string;
     _id: string;
@@ -95,12 +98,12 @@ export interface SearchResponse {
   searchId: string;
   searchResponse: {
     searchResults: SearchResult[];
-    records: PipesHub.Record[];
+    records: Aerointel.Record[];
   };
 }
 
 export interface SearchFilters {
-  department?: string[];
+  aircraft?: string[];
   moduleId?: string[];
   appSpecificRecordType?: string[];
   app?: string[];
@@ -112,5 +115,5 @@ export interface KnowledgeSearchProps {
   onSearchQueryChange: (query: string) => void;
   onTopKChange: (callback: (prevTopK: number) => number) => void;
   onViewCitations: (recordId: string, extension: string, recordCitation?: SearchResult) => Promise<void>;
-  recordsMap: Record<string, PipesHub.Record>;
+  recordsMap: Record<string, Aerointel.Record>;
 }

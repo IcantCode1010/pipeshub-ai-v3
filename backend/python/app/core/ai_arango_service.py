@@ -362,6 +362,31 @@ class ArangoService:
         cursor = self.db.aql.execute(query)
         return list(cursor)
 
+    async def get_aircraft(self, org_id: str) -> List[str]:
+        """
+        Get all aircraft for an organization
+
+        Args:
+            org_id (str): Organization ID to filter aircraft
+
+        Returns:
+            List[str]: List of aircraft names
+        """
+        try:
+            # For now, return all aircraft. Later this could be org-specific
+            query = f"""
+                FOR aircraft IN {CollectionNames.AIRCRAFT.value}
+                    FILTER aircraft.orgId == null OR aircraft.orgId == @org_id
+                    RETURN aircraft.aircraftName
+            """
+            cursor = self.db.aql.execute(query, bind_vars={"org_id": org_id})
+            aircraft_names = list(cursor)
+            self.logger.info(f"✅ Found {len(aircraft_names)} aircraft for org {org_id}")
+            return aircraft_names
+        except Exception as e:
+            self.logger.error(f"❌ Error getting aircraft for org {org_id}: {str(e)}")
+            return []
+
     async def find_duplicate_files(
         self,
         file_key: str,
@@ -446,7 +471,7 @@ class ArangoService:
 
             # Define collections to copy relationships from
             edge_collections = [
-                CollectionNames.BELONGS_TO_DEPARTMENT.value,
+                CollectionNames.BELONGS_TO_AIRCRAFT.value,
                 CollectionNames.BELONGS_TO_CATEGORY.value,
                 CollectionNames.BELONGS_TO_LANGUAGE.value,
                 CollectionNames.BELONGS_TO_TOPIC.value

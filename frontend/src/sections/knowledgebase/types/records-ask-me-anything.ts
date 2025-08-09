@@ -2,7 +2,7 @@ export interface InitialContext {
     recordId: string;
     recordName: string;
     recordType: string;
-    departments?: string[];
+    aircraft?: string;
     modules?: string[];
     categories?: string[];
   }
@@ -17,7 +17,7 @@ export interface RecordSalesAgentProps {
     _id?: string | null;
     name?: string;
     title?: string;
-    departments?: string[];
+    aircraft?: string;
     recordType?: string;
     conversationSource?: string | null;
     lastActivityAt?: string;
@@ -62,5 +62,5 @@ export interface RecordSalesAgentProps {
     isOwner?: boolean;
     accessLevel?: string;
     name?: string;
-    departments?: any;
+    aircraft?: string;
   }

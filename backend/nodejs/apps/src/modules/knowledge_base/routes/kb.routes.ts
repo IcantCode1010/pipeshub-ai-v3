@@ -20,6 +20,7 @@ import {
   getConnectorStats,
   reindexAllRecords,
   resyncConnectorRecords,
+  resetStuckRecords,
 } from '../controllers/kb_controllers';
 import { ArangoService } from '../../../libs/services/arango.service';
 import { metricsMiddleware } from '../../../libs/middlewares/prometheus.middleware';
@@ -261,6 +262,14 @@ export function createKnowledgeBaseRouter(container: Container): Router {
     metricsMiddleware(container),
     ValidationMiddleware.validate(resyncConnectorSchema),
     resyncConnectorRecords(recordRelationService),
+  );
+
+  // Reset stuck records (admin only)
+  router.post(
+    '/admin/reset-stuck-records',
+    authMiddleware.authenticate,
+    metricsMiddleware(container),
+    resetStuckRecords(recordRelationService),
   );
 
   return router;

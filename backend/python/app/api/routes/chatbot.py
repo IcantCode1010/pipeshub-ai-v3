@@ -22,6 +22,8 @@ from app.utils.query_transform import (
     setup_followup_query_transformation,
 )
 from app.utils.streaming import create_sse_event, stream_llm_response
+from app.utils.aircraft_normalizer import normalize_aircraft
+import time
 
 router = APIRouter()
 
@@ -111,6 +113,27 @@ async def askAIStream(
             # Query decomposition
             yield create_sse_event("status", {"status": "decomposing", "message": "Decomposing query..."})
 
+            # Aircraft scoping headers and behavior (stream)
+            client = (request.headers.get("x-client") or "generic_rag").lower()
+            strict_scope = (request.headers.get("x-strict-scope", "").lower() in ("1", "true", "yes"))
+
+            aircraft_input = request.headers.get("x-aircraft")
+            try:
+                if (not aircraft_input) and query_info.filters and isinstance(query_info.filters.get("aircraft"), list) and query_info.filters["aircraft"]:
+                    aircraft_input = query_info.filters["aircraft"][0]
+            except Exception:
+                pass
+
+            if client == "efb_ai" and strict_scope and not aircraft_input:
+                yield create_sse_event("error", {"status": 400, "message": "Select aircraft"})
+                return
+
+            aircraft_canonical = None
+            if aircraft_input:
+                canonical_candidate, _aliases = normalize_aircraft(aircraft_input)
+                if canonical_candidate != "unknown":
+                    aircraft_canonical = canonical_candidate
+
             decomposed_queries = []
 
             if not query_info.quickMode:
@@ -138,14 +161,23 @@ async def askAIStream(
                 yield create_sse_event("transformed_query", {"status": "transforming", "query": query, "index": i+1})
 
             yield create_sse_event("status", {"status": "searching", "message": "Executing searches..."})
+            start_ts = time.monotonic()
             result = await retrieval_service.search_with_filters(
-                    queries=all_queries,
-                    org_id=org_id,
-                    user_id=user_id,
-                    limit=query_info.limit,
-                    filter_groups=query_info.filters,
-                    arango_service=arango_service,
-                )
+                queries=all_queries,
+                org_id=org_id,
+                user_id=user_id,
+                limit=query_info.limit,
+                filter_groups=query_info.filters,
+                aircraft_canonical=aircraft_canonical,
+                arango_service=arango_service,
+            )
+            latency = time.monotonic() - start_ts
+            candidates = len(result.get("searchResults", []) or [])
+            logger.info(
+                f"[chat.stream] client={client} aircraft={aircraft_canonical or 'null'} "
+                f"collection={getattr(retrieval_service, 'collection_name', 'unknown')} "
+                f"candidates={candidates} latency={latency:.3f}s"
+            )
 
             yield create_sse_event("search_complete", {"results_count": len(result.get("searchResults", []))})
 
@@ -328,14 +360,43 @@ async def askAI(
         user_id = request.state.user.get('userId')
         send_user_info = request.query_params.get('sendUserInfo', True)
 
+        # Aircraft scoping headers and behavior (non-stream)
+        client = (request.headers.get("x-client") or "generic_rag").lower()
+        strict_scope = (request.headers.get("x-strict-scope", "").lower() in ("1", "true", "yes"))
+
+        aircraft_input = request.headers.get("x-aircraft")
+        try:
+            if (not aircraft_input) and query_info.filters and isinstance(query_info.filters.get("aircraft"), list) and query_info.filters["aircraft"]:
+                aircraft_input = query_info.filters["aircraft"][0]
+        except Exception:
+            pass
+
+        if client == "efb_ai" and strict_scope and not aircraft_input:
+            raise HTTPException(status_code=400, detail="Select aircraft")
+
+        aircraft_canonical = None
+        if aircraft_input:
+            canonical_candidate, _aliases = normalize_aircraft(aircraft_input)
+            if canonical_candidate != "unknown":
+                aircraft_canonical = canonical_candidate
+
+        start_ts = time.monotonic()
         result = await retrieval_service.search_with_filters(
-                queries=all_queries,
-                org_id=org_id,
-                user_id=user_id,
-                limit=query_info.limit,
-                filter_groups=query_info.filters,
-                arango_service=arango_service,
-            )
+            queries=all_queries,
+            org_id=org_id,
+            user_id=user_id,
+            limit=query_info.limit,
+            filter_groups=query_info.filters,
+            aircraft_canonical=aircraft_canonical,
+            arango_service=arango_service,
+        )
+        latency = time.monotonic() - start_ts
+        candidates = len(result.get("searchResults", []) or [])
+        logger.info(
+            f"[chat] client={client} aircraft={aircraft_canonical or 'null'} "
+            f"collection={getattr(retrieval_service, 'collection_name', 'unknown')} "
+            f"candidates={candidates} latency={latency:.3f}s"
+        )
 
         # Flatten and deduplicate results based on document ID or other unique identifier
         flattened_results = []

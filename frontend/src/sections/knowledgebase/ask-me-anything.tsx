@@ -138,7 +138,7 @@ const RecordHeader = ({
       {/* {record && !isConversation && (
         <Chip
           size="small"
-          label={record.departments?.[0]?.name || 'No Department'}
+          label={record.aircraft || 'No Aircraft'}
           sx={{
             backgroundColor: 'background.neutral',
             '& .MuiChip-label': { px: 2 },
@@ -179,7 +179,7 @@ const RecordSalesAgent = ({ initialContext, recordId }: RecordSalesAgentProps) =
       ? {
           _id: initialContext.recordId,
           name: initialContext.recordName,
-          departments: initialContext.departments,
+          aircraft: initialContext.aircraft,
           recordType: initialContext.recordType,
         }
       : null
@@ -352,7 +352,7 @@ const RecordSalesAgent = ({ initialContext, recordId }: RecordSalesAgentProps) =
       ...initialContext,
       _id: initialContext.recordId,
       name: initialContext.recordName,
-      departments: initialContext.departments,
+      aircraft: initialContext.aircraft,
       recordType: initialContext.recordType,
       conversationSource: 'records',
     });
@@ -481,7 +481,7 @@ const RecordSalesAgent = ({ initialContext, recordId }: RecordSalesAgentProps) =
               recordId: selectedRecord._id,
               recordName: selectedRecord.name || selectedRecord.title,
               recordType: selectedRecord.recordType,
-              departments: selectedRecord.departments?.map((d) => d),
+              aircraft: selectedRecord.aircraft,
               source: 'record_details',
             },
           }

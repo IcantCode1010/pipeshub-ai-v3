@@ -298,13 +298,15 @@ def get_generator_model(provider: str, config: Dict[str, Any]) -> BaseChatModel:
             )
 
     elif provider == LLMProvider.OPENAI.value:
-        from langchain_community.chat_models import ChatOpenAI
+        from langchain_openai import ChatOpenAI
 
         return ChatOpenAI(
                 model=configuration["model"],
                 temperature=0.2,
                 api_key=configuration["apiKey"],
                 organization=configuration.get("organizationId"),
+                timeout=60,  # Add timeout to prevent hanging
+                max_retries=2,  # Add retry logic
             )
 
     elif provider == LLMProvider.XAI.value:

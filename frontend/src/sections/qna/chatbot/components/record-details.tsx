@@ -560,7 +560,7 @@ const RecordDetails = ({ recordId, onExternalLink}: RecordDetailsProps) => {
               sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' }, gap: 2 }}
             >
               {/* Departments */}
-              {recordData.metadata.departments && recordData.metadata.departments.length > 0 && (
+              {recordData.metadata.aircraft && recordData.metadata.aircraft.length > 0 && (
                 <MetadataSection>
                   <Typography
                     variant="caption"
@@ -577,7 +577,7 @@ const RecordDetails = ({ recordId, onExternalLink}: RecordDetailsProps) => {
                     <Icon icon={departmentIcon} width={14} height={14} />
                     Departments
                   </Typography>
-                  {renderChips(recordData.metadata.departments)}
+                  {renderChips(recordData.metadata.aircraft)}
                 </MetadataSection>
               )}
 

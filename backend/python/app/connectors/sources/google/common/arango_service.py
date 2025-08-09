@@ -992,26 +992,47 @@ class ArangoService(BaseArangoService):
             ]
 
             # Step 1: Remove edges from all edge collections
+            total_edges_removed = 0
             for edge_collection in EDGE_COLLECTIONS:
                 try:
                     edge_removal_query = """
                     LET record_id_full = CONCAT('records/', @node_key)
-                    FOR edge IN @@edge_collection
-                        FILTER edge._from == record_id_full OR edge._to == record_id_full
-                        REMOVE edge IN @@edge_collection
+                    LET edges_to_remove = (
+                        FOR edge IN @@edge_collection
+                            FILTER edge._from == record_id_full OR edge._to == record_id_full
+                            RETURN edge
+                    )
+                    LET removed_edges = (
+                        FOR edge IN edges_to_remove
+                            REMOVE edge IN @@edge_collection
+                            RETURN OLD
+                    )
+                    RETURN LENGTH(removed_edges)
                     """
                     bind_vars = {
                         "node_key": node_key,
                         "@edge_collection": edge_collection,
                     }
-                    db.aql.execute(edge_removal_query, bind_vars=bind_vars)
-                    self.logger.info(
-                        f"✅ Edges from {edge_collection} deleted for node {node_key}"
-                    )
+                    cursor = db.aql.execute(edge_removal_query, bind_vars=bind_vars)
+                    edges_removed = list(cursor)[0] if cursor else 0
+                    total_edges_removed += edges_removed
+                    
+                    if edges_removed > 0:
+                        self.logger.info(
+                            f"✅ {edges_removed} edges from {edge_collection} deleted for node {node_key}"
+                        )
+                    else:
+                        self.logger.debug(
+                            f"ℹ️ No edges found in {edge_collection} for node {node_key}"
+                        )
                 except Exception as e:
-                    self.logger.warning(
-                        f"⚠️ Could not delete edges from {edge_collection} for node {node_key}: {str(e)}"
+                    self.logger.error(
+                        f"❌ Failed to delete edges from {edge_collection} for node {node_key}: {str(e)}"
                     )
+                    # Continue with other collections even if one fails
+                    continue
+
+            self.logger.info(f"✅ Total {total_edges_removed} edges removed for node {node_key}")
 
             # Step 2: Delete node from `records` and `files` collections
             delete_query = """

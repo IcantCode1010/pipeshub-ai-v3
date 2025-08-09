@@ -30,7 +30,7 @@ The AI service follows a retrieval-augmented generation (RAG) pattern:
 The platform supports 15+ LLM providers through a unified interface:
 - **OpenAI**: GPT-4, GPT-3.5 models
 - **Anthropic**: Claude 3.5 Sonnet, Claude 3 Haiku/Opus
-- **Google**: Gemini 1.5 Pro/Flash, Vertex AI
+- **Google**: Gemini 1.5 Pro/Flash, Gemini 2.5 Flash, Vertex AI
 - **AWS Bedrock**: Claude, Titan models
 - **Others**: Cohere, Mistral, Groq, Fireworks, Together, xAI, Ollama
 - **Embedding models**: OpenAI, Voyage, JinaAI, Mistral, Cohere, local models
@@ -68,6 +68,9 @@ npm run build          # TypeScript compilation
 npm run lint           # ESLint check
 npm run format         # Prettier formatting
 npm test               # Run Mocha tests
+
+# Manual cleanup for stuck records (when needed)
+node manual-cleanup-stuck-record.js
 ```
 
 ### Docker Development
@@ -161,6 +164,7 @@ docker compose -f docker-compose.ollama-dev.yml -p pipeshub-ai up -d
 - Message format adjustments (human/assistant roles instead of system messages) in `backend/python/app/api/routes/chatbot.py`
 - Flexible response parsing supporting both JSON and plain text formats
 - **Critical**: Response validation and fallback handling in `backend/nodejs/apps/src/modules/enterprise_search/utils/utils.ts`
+- **New**: Improved streaming response handling for Gemini 2.5 Flash with better error recovery
 
 **Common LLM Integration Issues:**
 - **Response format validation**: The `buildAIResponseMessage` function handles multiple response formats and ensures schema compliance
@@ -231,6 +235,20 @@ Refer to `env.template` files in each service directory for complete configurati
 - `frontend/src/config-global.ts`: Frontend configuration constants
 - `backend/python/pyproject.toml`: Python dependencies and build configuration
 
+### Recent Dependency Updates
+**Python Service (pyproject.toml)**:
+- **LangChain Ecosystem**: Updated to latest versions (langchain 0.3.19, langgraph 0.3.34)
+- **New LLM Providers**: Added xAI integration (langchain-xai 0.2.4)
+- **Enhanced Embeddings**: Added Voyage AI and JinaAI support
+- **Document Processing**: Upgraded to Docling 2.25.1 for better PDF/document parsing
+- **Vector Search**: Qdrant client 1.13.1 with improved performance
+
+**Node.js Service (package.json)**:
+- **Enhanced Authentication**: Updated Azure MSAL, SAML, and OAuth implementations
+- **Better Error Handling**: Improved with latest axios-retry and async-mutex
+- **Database Drivers**: Updated MongoDB (6.14.2) and ArangoDB (10.1.1) drivers
+- **Security**: Latest helmet (8.0.0) and crypto implementations
+
 ## Project Structure Patterns
 
 ### Frontend Architecture
@@ -276,3 +294,33 @@ npm run test:watch     # Watch mode
 3. **Service Development**: Individual services can be developed outside Docker for faster iteration
 4. **Database Management**: ArangoDB and MongoDB GUIs available on respective ports
 5. **Log Monitoring**: Use docker compose logs for debugging across services
+
+## Migration & Schema Evolution
+
+### Aircraft Metadata Migration
+Recent system evolution from department-based to aircraft-based metadata extraction:
+
+**Migration Scripts**:
+```bash
+cd backend/python
+
+# Database schema migration (dry run first)
+python app/scripts/migrate_departments_to_aircraft.py --dry-run
+python app/scripts/migrate_departments_to_aircraft.py
+
+# Document reindexing with aircraft metadata
+python app/scripts/reindex_documents_aircraft.py --dry-run
+python app/scripts/reindex_documents_aircraft.py --batch-size 20
+```
+
+**What Changed**:
+- **Data Model**: `Departments` interface replaced with `Aircraft` interface
+- **Extraction Logic**: Enhanced domain extraction in `backend/python/app/modules/extraction/`
+- **Database Schema**: ArangoDB collections migrated from departments to aircraft
+- **Frontend Types**: New `aircraft.ts` type definitions with backward compatibility
+
+**Migration Validation**:
+- Check aircraft collection has 42+ aircraft types
+- Verify documents have populated aircraft metadata
+- Confirm old department collections are removed
+- Monitor extraction performance post-migration

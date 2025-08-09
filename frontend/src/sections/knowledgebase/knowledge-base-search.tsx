@@ -21,7 +21,7 @@ import MarkdownViewer from '../qna/chatbot/components/markdown-highlighter';
 import { getConnectorPublicUrl } from '../accountdetails/account-settings/services/utils/services-configuration-service';
 
 import type { Filters } from './types/knowledge-base';
-import type { PipesHub, SearchResult, AggregatedDocument } from './types/search-response';
+import type { Aerointel, SearchResult, AggregatedDocument } from './types/search-response';
 import { createScrollableContainerStyle } from '../qna/chatbot/utils/styles/scrollbar';
 
 // Constants for sidebar widths - must match with the sidebar component
@@ -63,7 +63,7 @@ export default function KnowledgeBaseSearch() {
   const theme = useTheme();
   // Make sure the filters state has app property instead of connector
   const [filters, setFilters] = useState<Filters>({
-    department: [],
+    aircraft: [],
     moduleId: [],
     appSpecificRecordType: [],
     app: [], // Updated to use app instead of connector
@@ -84,7 +84,7 @@ export default function KnowledgeBaseSearch() {
   const [fileUrl, setFileUrl] = useState<string>('');
   const [recordCitations, setRecordCitations] = useState<AggregatedDocument | null>(null);
   const [hasSearched, setHasSearched] = useState<boolean>(false);
-  const [recordsMap, setRecordsMap] = useState<Record<string, PipesHub.Record>>({});
+  const [recordsMap, setRecordsMap] = useState<Record<string, Aerointel.Record>>({});
   const [fileBuffer, setFileBuffer] = useState<ArrayBuffer | null>(null);
   const [highlightedCitation, setHighlightedCitation] = useState<SearchResult | null>();
   // Prevent rapid filter changes
@@ -151,7 +151,7 @@ export default function KnowledgeBaseSearch() {
   );
 
   const aggregateRecordsByRecordId = useCallback(
-    (records: PipesHub.Record[]): Record<string, PipesHub.Record> =>
+    (records: Aerointel.Record[]): Record<string, Aerointel.Record> =>
       records.reduce(
         (acc, record) => {
           // Use _key as the lookup key
@@ -162,7 +162,7 @@ export default function KnowledgeBaseSearch() {
 
           return acc;
         },
-        {} as Record<string, PipesHub.Record>
+        {} as Record<string, Aerointel.Record>
       ),
 
     []

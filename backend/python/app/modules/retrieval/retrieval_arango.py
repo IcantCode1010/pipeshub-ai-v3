@@ -187,12 +187,12 @@ class ArangoService:
             # Add filter conditions if provided
             filter_conditions = []
             if filters:
-                if filters.get("departments"):
+                if filters.get("aircraft"):
                     filter_conditions.append(
                         f"""
                     LENGTH(
-                        FOR dept IN OUTBOUND record._id {CollectionNames.BELONGS_TO_DEPARTMENT.value}
-                        FILTER dept.departmentName IN @departmentNames
+                        FOR plane IN OUTBOUND record._id {CollectionNames.BELONGS_TO_AIRCRAFT.value}
+                        FILTER plane.aircraftName IN @aircraftNames
                         LIMIT 1
                         RETURN 1
                     ) > 0
@@ -307,10 +307,10 @@ class ArangoService:
             }
             # Add filter bind variables
             if filters:
-                if filters.get("departments"):
-                    bind_vars["departmentNames"] = filters[
-                        "departments"
-                    ]  # Direct department names
+                if filters.get("aircraft"):
+                    bind_vars["aircraftNames"] = filters[
+                        "aircraft"
+                    ]  # Direct aircraft names
                 if filters.get("categories"):
                     bind_vars["categoryNames"] = filters[
                         "categories"
@@ -347,11 +347,20 @@ class ArangoService:
                 stream=True
             )
             result = list(cursor)
+            
+            # Clean up None values from the result
             if result:
                 if isinstance(result[0], dict):
-                    return result
+                    # Filter out None records
+                    cleaned_result = [r for r in result if r is not None]
+                    return cleaned_result
+                elif isinstance(result[0], list):
+                    # If we get a nested list (from RETURN allAccessibleRecords), unwrap and clean it
+                    unwrapped_result = result[0]
+                    cleaned_result = [r for r in unwrapped_result if r is not None]
+                    return cleaned_result
                 else:
-                    return result[0]
+                    return result[0] if result[0] is not None else []
             else:
                 return []
 
@@ -504,11 +513,11 @@ class ArangoService:
             metadata_query = f"""
             LET record = DOCUMENT(CONCAT('{CollectionNames.RECORDS.value}/', @recordId))
 
-            LET departments = (
-                FOR dept IN OUTBOUND record._id {CollectionNames.BELONGS_TO_DEPARTMENT.value}
+            LET aircraft = (
+                FOR plane IN OUTBOUND record._id {CollectionNames.BELONGS_TO_AIRCRAFT.value}
                 RETURN {{
-                    id: dept._key,
-                    name: dept.departmentName
+                    id: plane._key,
+                    name: plane.aircraftName
                 }}
             )
 
@@ -565,7 +574,7 @@ class ArangoService:
             )
 
             RETURN {{
-                departments: departments,
+                aircraft: aircraft,
                 categories: categories,
                 subcategories1: subcategories1,
                 subcategories2: subcategories2,

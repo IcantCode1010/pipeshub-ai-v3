@@ -2007,10 +2007,10 @@ export default function RecordDetails() {
                       </Box>
                     )}
 
-                    {/* Departments */}
-                    {metadata?.departments &&
-                      metadata.departments.length > 0 &&
-                      hasValidNames(metadata.departments) && (
+                    {/* Aircraft */}
+                    {metadata?.aircraft &&
+                      metadata.aircraft.length > 0 &&
+                      hasValidNames(metadata.aircraft) && (
                         <Box>
                           <Typography
                             variant="caption"
@@ -2024,9 +2024,9 @@ export default function RecordDetails() {
                               mb: 0.75,
                             }}
                           >
-                            Departments
+                            Aircraft
                           </Typography>
-                          {renderChips(metadata.departments)}
+                          {renderChips(metadata.aircraft)}
                         </Box>
                       )}
 
@@ -2167,10 +2167,10 @@ export default function RecordDetails() {
                         </Box>
                       )}
 
-                    {(record.departments || record.appSpecificRecordType) && <Divider />}
+                    {(record.aircraft || record.appSpecificRecordType) && <Divider />}
 
-                    {/* Original department section from the record */}
-                    {record.departments && record.departments.length > 0 && (
+                    {/* Aircraft section from the record */}
+                    {record.aircraft && (
                       <Box>
                         <Typography
                           variant="caption"
@@ -2184,45 +2184,42 @@ export default function RecordDetails() {
                             mb: 0.75,
                           }}
                         >
-                          Record Departments
+                          Aircraft
                         </Typography>
                         <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
-                          {record.departments.map((dept) => (
-                            <Chip
-                              key={dept._id}
-                              label={dept.name}
-                              size="small"
-                              sx={{
-                                height: 22,
-                                fontSize: '0.75rem',
-                                fontWeight: 500,
-                                borderRadius: '4px',
-                                // Clean, professional styling for both modes
+                          <Chip
+                            label={record.aircraft}
+                            size="small"
+                            sx={{
+                              height: 22,
+                              fontSize: '0.75rem',
+                              fontWeight: 500,
+                              borderRadius: '4px',
+                              // Clean, professional styling for both modes
+                              bgcolor: (themeVal) =>
+                                themeVal.palette.mode !== 'dark'
+                                  ? alpha(themeVal.palette.grey[800], 0.1)
+                                  : alpha(themeVal.palette.grey[100], 0.8),
+                              color: (themeVal) =>
+                                themeVal.palette.mode === 'dark'
+                                  ? themeVal.palette.grey[100]
+                                  : themeVal.palette.grey[800],
+                              border: (themeVal) =>
+                                themeVal.palette.mode === 'dark'
+                                  ? `1px solid ${alpha(themeVal.palette.grey[700], 0.5)}`
+                                  : `1px solid ${alpha(themeVal.palette.grey[300], 1)}`,
+                              '& .MuiChip-label': {
+                                px: 1,
+                                py: 0.25,
+                              },
+                              '&:hover': {
                                 bgcolor: (themeVal) =>
                                   themeVal.palette.mode !== 'dark'
-                                    ? alpha(themeVal.palette.grey[800], 0.1)
-                                    : alpha(themeVal.palette.grey[100], 0.8),
-                                color: (themeVal) =>
-                                  themeVal.palette.mode === 'dark'
-                                    ? themeVal.palette.grey[100]
-                                    : themeVal.palette.grey[800],
-                                border: (themeVal) =>
-                                  themeVal.palette.mode === 'dark'
-                                    ? `1px solid ${alpha(themeVal.palette.grey[700], 0.5)}`
-                                    : `1px solid ${alpha(themeVal.palette.grey[300], 1)}`,
-                                '& .MuiChip-label': {
-                                  px: 1,
-                                  py: 0.25,
-                                },
-                                '&:hover': {
-                                  bgcolor: (themeVal) =>
-                                    themeVal.palette.mode !== 'dark'
-                                      ? alpha(themeVal.palette.grey[700], 0.1)
-                                      : alpha(themeVal.palette.grey[200], 0.1),
-                                },
-                              }}
-                            />
-                          ))}
+                                    ? alpha(themeVal.palette.grey[700], 0.1)
+                                    : alpha(themeVal.palette.grey[200], 0.1),
+                              },
+                            }}
+                          />
                         </Box>
                       </Box>
                     )}
@@ -2785,7 +2782,7 @@ export default function RecordDetails() {
                 recordId: record._id,
                 recordName: record.recordName,
                 recordType: record.recordType,
-                departments: record.departments?.map((d) => d.name),
+                aircraft: record.aircraft,
                 modules: record.modules?.map((m) => m.name),
                 categories: record.appSpecificRecordType?.map((t) => t.name),
               }}

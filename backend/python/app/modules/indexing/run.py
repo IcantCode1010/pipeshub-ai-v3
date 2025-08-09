@@ -6,6 +6,7 @@ from langchain_qdrant import FastEmbedSparse, QdrantVectorStore, RetrievalMode
 from qdrant_client import QdrantClient
 from qdrant_client.http import models
 from qdrant_client.http.models import FieldCondition, Filter, MatchValue
+from app.utils.aircraft_normalizer import normalize_aircraft
 
 from app.config.configuration_service import config_node_constants
 from app.config.utils.named_constants.arangodb_constants import (
@@ -33,11 +34,14 @@ class CustomChunker(SemanticChunker):
         self.breakpoint_threshold_amount: float = 1
 
     def split_documents(self, documents: List[Document]) -> List[Document]:
-        """Override split_documents to use our custom merging logic"""
+        """Override split_documents to use our custom merging logic with chunk count optimization"""
         try:
-            self.logger.info("Splitting documents")
+            self.logger.info(f"Splitting {len(documents)} documents")
             if len(documents) <= 1:
                 return documents
+
+            # Check for large document sets and apply chunk count limits
+            documents = self._optimize_for_large_documents(documents)
 
             # Calculate distances between adjacent documents
             try:
@@ -188,6 +192,92 @@ class CustomChunker(SemanticChunker):
                 "Unexpected error during document splitting: " + str(e),
                 details={"error": str(e)},
             )
+
+    def _optimize_for_large_documents(self, documents: List[Document]) -> List[Document]:
+        """
+        Optimize chunk count for large documents to prevent memory issues.
+        Applies intelligent merging for documents with excessive chunk counts.
+        """
+        try:
+            doc_count = len(documents)
+            max_recommended_chunks = 800  # Conservative limit to prevent memory issues
+            
+            if doc_count <= max_recommended_chunks:
+                return documents
+                
+            self.logger.warning(f"🔍 Large document detected: {doc_count} chunks, applying optimization")
+            
+            # Calculate merge ratio to get under the limit
+            merge_ratio = doc_count / max_recommended_chunks
+            target_chunk_size = int(merge_ratio) + 1
+            
+            self.logger.info(f"📊 Merging documents with ratio ~{merge_ratio:.1f} (target groups of {target_chunk_size})")
+            
+            optimized_documents = []
+            i = 0
+            
+            while i < len(documents):
+                # Determine group size with some variance for natural breaks
+                base_group_size = target_chunk_size
+                # Add small variance to avoid rigid patterns
+                group_size = min(base_group_size + (i % 3), len(documents) - i)
+                
+                # Get the group of documents to merge
+                group = documents[i:i + group_size]
+                
+                if len(group) == 1:
+                    # Single document, keep as-is
+                    optimized_documents.append(group[0])
+                else:
+                    # Merge the group
+                    merged_text = " ".join(doc.page_content for doc in group)
+                    
+                    # Merge metadata from all documents in group
+                    metadata_list = [doc.metadata for doc in group]
+                    merged_metadata = self._merge_metadata(metadata_list)
+                    
+                    # Merge bounding boxes if present
+                    bboxes = [
+                        doc.metadata.get("bounding_box", [])
+                        for doc in group
+                        if doc.metadata.get("bounding_box")
+                    ]
+                    merged_metadata["bounding_box"] = (
+                        self._merge_bboxes(bboxes) if bboxes else None
+                    )
+                    
+                    # Update block numbers to reflect merged state
+                    if len(group) > 1:
+                        block_nums = []
+                        for doc in group:
+                            nums = doc.metadata.get("blockNum", [])
+                            if isinstance(nums, list):
+                                block_nums.extend(nums)
+                            else:
+                                block_nums.append(nums)
+                        merged_metadata["blockNum"] = sorted(list(set(block_nums)))
+                    
+                    # Create merged document
+                    optimized_documents.append(
+                        Document(
+                            page_content=merged_text,
+                            metadata=merged_metadata,
+                        )
+                    )
+                
+                i += group_size
+            
+            reduction_pct = ((doc_count - len(optimized_documents)) / doc_count) * 100
+            self.logger.info(
+                f"✅ Document optimization complete: {doc_count} → {len(optimized_documents)} chunks "
+                f"({reduction_pct:.1f}% reduction)"
+            )
+            
+            return optimized_documents
+            
+        except Exception as e:
+            self.logger.warning(f"Failed to optimize document chunks, using original: {str(e)}")
+            return documents
 
     def _merge_bboxes(self, bboxes: List[List[dict]]) -> List[dict]:
         """Merge multiple bounding boxes into one encompassing box"""
@@ -420,6 +510,18 @@ class IndexingPipeline:
                         type=models.KeywordIndexType.KEYWORD,
                     ),
                 )
+                # Aircraft scoping index (root-level)
+                try:
+                    self.qdrant_client.create_payload_index(
+                        collection_name=self.collection_name,
+                        field_name="aircraft_canonical",
+                        field_schema=models.KeywordIndexParams(
+                            type=models.KeywordIndexType.KEYWORD,
+                        ),
+                    )
+                except Exception as e:
+                    # Ignore if already exists or server returns a non-fatal error
+                    self.logger.info(f"aircraft_canonical index ensure: {str(e)}")
             except Exception as e:
                 self.logger.error(
                     f"❌ Error creating collection {self.collection_name}: {str(e)}"
@@ -505,9 +607,165 @@ class IndexingPipeline:
                 "Failed to get embedding model: " + str(e), details={"error": str(e)}
             )
 
+    async def _process_embeddings_in_batches(self, chunks: List[Document]) -> None:
+        """
+        Process embeddings in memory-aware batches to handle large documents efficiently.
+        
+        Args:
+            chunks: List of document chunks to embed
+            
+        Raises:
+            EmbeddingError: If there's an error creating embeddings
+            VectorStoreError: If there's an error storing embeddings
+        """
+        import gc
+        import asyncio
+        from math import ceil
+        
+        try:
+            total_chunks = len(chunks)
+            self.logger.info(f"🔄 Starting batch processing for {total_chunks} chunks")
+            
+            # Determine batch size based on chunk count
+            # Adaptive batch sizing based on content
+            base_batch_size = 50  # Conservative default
+            if total_chunks > 500:
+                batch_size = 30  # Large document optimization
+                self.logger.info("📚 Large document detected - using optimized batch size of 30")
+            else:
+                batch_size = base_batch_size
+                
+            # Calculate average content length to adjust batch size
+            try:
+                avg_content_length = sum(len(chunk.page_content) for chunk in chunks[:10]) / min(10, len(chunks))
+                if avg_content_length > 5000:  # Very large chunks
+                    batch_size = max(10, batch_size // 2)
+                    self.logger.info(f"📄 Large chunk content detected - reduced batch size to {batch_size}")
+            except Exception as e:
+                self.logger.warning(f"Could not calculate average content length: {e}")
+            
+            num_batches = ceil(total_chunks / batch_size)
+            self.logger.info(f"📊 Processing {total_chunks} chunks in {num_batches} batches of up to {batch_size} chunks each")
+            
+            # Circuit breaker for batch failures
+            max_batch_failures = 3
+            batch_failures = 0
+            
+            for batch_idx in range(num_batches):
+                start_idx = batch_idx * batch_size
+                end_idx = min(start_idx + batch_size, total_chunks)
+                batch_chunks = chunks[start_idx:end_idx]
+                
+                batch_info = f"batch {batch_idx + 1}/{num_batches} ({end_idx - start_idx} chunks)"
+                
+                try:
+                    # Process batch
+                    self.logger.info(f"🔄 Processing {batch_info}")
+                    await self._store_batch_with_retry(batch_chunks, batch_info)
+                    
+                    # Reset failure count on success
+                    batch_failures = 0
+                    
+                    # Progress logging
+                    progress_pct = ((batch_idx + 1) / num_batches) * 100
+                    self.logger.info(f"✅ Completed {batch_info} - Progress: {progress_pct:.1f}%")
+                    
+                    # Memory cleanup between batches
+                    if batch_idx < num_batches - 1:  # Don't sleep after last batch
+                        gc.collect()
+                        # Brief pause to allow memory cleanup  
+                        await asyncio.sleep(0.1)
+                
+                except Exception as e:
+                    batch_failures += 1
+                    self.logger.error(f"❌ Failed to process {batch_info}: {str(e)}")
+                    
+                    # Circuit breaker check
+                    if batch_failures >= max_batch_failures:
+                        raise VectorStoreError(
+                            f"Too many batch failures ({batch_failures}/{max_batch_failures}). Aborting embedding process.",
+                            details={"failed_batch": batch_idx, "error": str(e)}
+                        )
+                    
+                    # Exponential backoff with jitter
+                    backoff_time = min(2 ** batch_failures + (batch_failures * 0.1), 10)
+                    self.logger.warning(f"⏳ Retrying after {backoff_time:.1f}s backoff...")
+                    await asyncio.sleep(backoff_time)
+                    
+                    # Retry with smaller batch size
+                    try:
+                        if len(batch_chunks) > 1:
+                            # Split failed batch in half
+                            mid_point = len(batch_chunks) // 2
+                            retry_batch_1 = batch_chunks[:mid_point]
+                            retry_batch_2 = batch_chunks[mid_point:]
+                            
+                            self.logger.info(f"🔄 Retrying {batch_info} with reduced batch sizes")
+                            await self._store_batch_with_retry(retry_batch_1, f"{batch_info}-retry-A")
+                            await self._store_batch_with_retry(retry_batch_2, f"{batch_info}-retry-B")
+                        else:
+                            await self._store_batch_with_retry(batch_chunks, f"{batch_info}-retry")
+                        
+                        # Reset failure count on successful retry
+                        batch_failures = 0
+                        self.logger.info(f"✅ Successfully retried {batch_info}")
+                        
+                    except Exception as retry_error:
+                        self.logger.error(f"❌ Retry failed for {batch_info}: {str(retry_error)}")
+                        raise VectorStoreError(
+                            f"Failed to process batch after retry: {str(retry_error)}",
+                            details={"batch_index": batch_idx, "retry_error": str(retry_error)}
+                        )
+            
+            self.logger.info(f"🎉 Successfully completed all {num_batches} batches for {total_chunks} chunks")
+            
+        except VectorStoreError:
+            raise
+        except Exception as e:
+            raise EmbeddingError(
+                f"Unexpected error during batch processing: {str(e)}",
+                details={"error": str(e), "total_chunks": len(chunks)}
+            )
+    
+    async def _store_batch_with_retry(self, batch_chunks: List[Document], batch_info: str, max_retries: int = 2) -> None:
+        """
+        Store a batch of chunks with retry logic and exponential backoff.
+        
+        Args:
+            batch_chunks: Chunks to store in this batch
+            batch_info: Description of the batch for logging
+            max_retries: Maximum number of retry attempts
+            
+        Raises:
+            VectorStoreError: If all retry attempts fail
+        """
+        for attempt in range(max_retries + 1):
+            try:
+                self.logger.debug(f"🔄 Storing {batch_info} (attempt {attempt + 1}/{max_retries + 1})")
+                await self.vector_store.aadd_documents(batch_chunks)
+                
+                if attempt > 0:
+                    self.logger.info(f"✅ Successfully stored {batch_info} on retry attempt {attempt + 1}")
+                
+                return  # Success - exit retry loop
+                
+            except Exception as e:
+                if attempt == max_retries:
+                    # Final attempt failed
+                    raise VectorStoreError(
+                        f"Failed to store {batch_info} after {max_retries + 1} attempts: {str(e)}",
+                        details={"error": str(e), "batch_size": len(batch_chunks)}
+                    )
+                else:
+                    # Retry with exponential backoff
+                    backoff_time = (2 ** attempt) * 0.5  # 0.5s, 1s, 2s
+                    self.logger.warning(f"⚠️ Attempt {attempt + 1} failed for {batch_info}, retrying in {backoff_time}s: {str(e)}")
+                    await asyncio.sleep(backoff_time)
+
     async def _create_embeddings(self, chunks: List[Document]) -> None:
         """
         Create both sparse and dense embeddings for document chunks and store them in vector store.
+        Uses batch processing to handle large documents efficiently.
 
         Args:
             chunks: List of document chunks to embed
@@ -519,11 +777,16 @@ class IndexingPipeline:
             DocumentProcessingError: If there's an error updating document status
         """
         try:
+            # Create embeddings for chunks
+            self.logger.info(f"🔄 Creating embeddings for {len(chunks)} chunks")
+            
             # Validate input
             if not chunks:
                 raise EmbeddingError("No chunks provided for embedding creation")
 
             # Process metadata for each chunk
+            virtual_record_id = None
+            meta = None
             for chunk in chunks:
                 try:
                     virtual_record_id = chunk.metadata["virtualRecordId"]
@@ -539,14 +802,35 @@ class IndexingPipeline:
 
             self.logger.debug("Enhanced metadata processed")
 
-            # Store in vector store
+            # Batch processing for large document sets
+            await self._process_embeddings_in_batches(chunks)
+
+            # After points are added, set root-level aircraft fields for all points with this virtualRecordId
             try:
-                await self.vector_store.aadd_documents(chunks)
-            except Exception as e:
-                raise VectorStoreError(
-                    "Failed to store documents in vector store: " + str(e),
-                    details={"error": str(e)},
+                # Derive canonical from the last processed chunk metadata (consistent per virtualRecordId)
+                aircraft_raw = (meta or {}).get("aircraft", "")
+                aircraft_canonical, aircraft_aliases = normalize_aircraft(aircraft_raw)
+                # Ensure we always set a value (unknown allowed)
+                if not aircraft_canonical:
+                    aircraft_canonical = "unknown"
+                self.qdrant_client.set_payload(
+                    collection_name=self.collection_name,
+                    payload={
+                        "aircraft_canonical": aircraft_canonical,
+                        "aircraft_aliases": aircraft_aliases or [],
+                    },
+                    points=None,
+                    filter=Filter(
+                        must=[
+                            FieldCondition(
+                                key="metadata.virtualRecordId",
+                                match=MatchValue(value=virtual_record_id),
+                            )
+                        ]
+                    ),
                 )
+            except Exception as e:
+                self.logger.warning(f"Failed to set aircraft payload on new points: {str(e)}")
 
             self.logger.info(
                 f"✅ Successfully added {len(chunks)} documents to vector store"
@@ -567,11 +851,11 @@ class IndexingPipeline:
                 doc.update(
                     {
                         "indexingStatus": "COMPLETED",
-                        "isDirty": False,
-                        "lastIndexTimestamp": get_epoch_timestamp_in_ms(),
-                        "virtualRecordId": virtual_record_id,
-                    }
-                )
+                            "isDirty": False,
+                            "lastIndexTimestamp": get_epoch_timestamp_in_ms(),
+                            "virtualRecordId": virtual_record_id,
+                        }
+                    )
 
                 docs = [doc]
 
@@ -582,7 +866,6 @@ class IndexingPipeline:
                     raise DocumentProcessingError(
                         "Failed to update indexing status", doc_id=meta["recordId"]
                     )
-                return
 
             except DocumentProcessingError:
                 raise
@@ -605,6 +888,56 @@ class IndexingPipeline:
                 "Unexpected error during embedding creation: " + str(e),
                 details={"error": str(e)},
             )
+
+    def _assess_memory_requirements(self, doc_count: int, estimated_size_mb: float) -> Dict[str, Any]:
+        """
+        Assess memory requirements for processing documents and determine the best strategy.
+        This function must NEVER hard-block ingestion; it should select an appropriate strategy.
+        
+        Args:
+            doc_count: Number of documents to process
+            estimated_size_mb: Estimated size of documents in MB
+            
+        Returns:
+            Dict containing recommended strategy and reasoning
+        """
+        # Thresholds for strategy guidance (no hard blocking)
+        MAX_DOCS_FOR_BATCH = 3000   # Prefer streaming above this count
+        MAX_SIZE_MB_FOR_BATCH = 100 # Prefer streaming above this size
+        CRITICAL_DOCS_THRESHOLD = 60000  # Very large doc count
+        CRITICAL_SIZE_MB_THRESHOLD = 500 # Very large size
+        
+        # Very large inputs -> streaming with conservative batches
+        if doc_count > CRITICAL_DOCS_THRESHOLD or estimated_size_mb > CRITICAL_SIZE_MB_THRESHOLD:
+            return {
+                'recommended_strategy': 'streaming',
+                'reason': f'Very large document: {doc_count} chunks, {estimated_size_mb:.1f}MB. '
+                          'Using streaming with conservative batch size.',
+                'doc_count': doc_count,
+                'estimated_size_mb': estimated_size_mb,
+                'batch_size': 20
+            }
+        
+        # Large inputs -> streaming
+        if doc_count > MAX_DOCS_FOR_BATCH or estimated_size_mb > MAX_SIZE_MB_FOR_BATCH:
+            return {
+                'recommended_strategy': 'streaming',
+                'reason': f'Large document detected: {doc_count} chunks, {estimated_size_mb:.1f}MB. '
+                          'Using streaming strategy for optimal memory usage.',
+                'doc_count': doc_count,
+                'estimated_size_mb': estimated_size_mb,
+                'batch_size': 30 if doc_count > 500 else 50
+            }
+        
+        # Small inputs -> batch
+        return {
+            'recommended_strategy': 'batch',
+            'reason': f'Standard document: {doc_count} chunks, {estimated_size_mb:.1f}MB. '
+                      'Using batch processing.',
+            'doc_count': doc_count,
+            'estimated_size_mb': estimated_size_mb,
+            'batch_size': 50
+        }
 
     async def delete_embeddings(self, record_id: str, virtual_record_id: str) -> None:
         """
@@ -711,6 +1044,23 @@ class IndexingPipeline:
         try:
             if not sentences:
                 raise DocumentProcessingError("No sentences provided for indexing")
+
+            # Early memory and performance assessment
+            doc_count = len(sentences)
+            estimated_size_mb = sum(len(str(s.get('text', ''))) for s in sentences) / (1024 * 1024)
+            
+            self.logger.info(f"📋 Starting indexing for {doc_count} documents (~{estimated_size_mb:.2f}MB)")
+            
+            # Perform memory check to determine processing strategy
+            memory_check = self._assess_memory_requirements(doc_count, estimated_size_mb)
+            
+            # Process document based on memory assessment
+            self.logger.info(f"📄 Processing document with {doc_count} documents (~{estimated_size_mb:.1f}MB)")
+            recommended_strategy = memory_check.get('recommended_strategy', 'streaming')
+            if recommended_strategy == 'blocked':
+                raise EmbeddingError(f"Cannot process document: {memory_check['reason']}")
+            else:
+                self.logger.info(f"📈 Recommended strategy: {recommended_strategy}")
 
             # Convert sentences to custom Document class
             try:
@@ -859,6 +1209,19 @@ class IndexingPipeline:
                 "extension": meta.get("extension", ""),
                 "mimeType": meta.get("mimeType", ""),
             }
+
+            # Copy-through raw aircraft (may be empty) and normalized fields inside metadata for downstream use
+            try:
+                aircraft_raw = meta.get("aircraft", "")
+                enhanced_metadata["aircraft"] = aircraft_raw
+                canonical, aliases = normalize_aircraft(aircraft_raw)
+                enhanced_metadata["aircraft_canonical"] = canonical or "unknown"
+                enhanced_metadata["aircraft_aliases"] = aliases or []
+            except Exception as e:
+                # Non-fatal: default to unknown if normalization fails
+                enhanced_metadata["aircraft"] = meta.get("aircraft", "")
+                enhanced_metadata["aircraft_canonical"] = "unknown"
+                enhanced_metadata["aircraft_aliases"] = []
 
             if meta.get("bounding_box"):
                 enhanced_metadata["bounding_box"] = meta.get("bounding_box")

@@ -35,11 +35,12 @@ class AzureOCRStrategy(OCRStrategy):
         # Initialize spaCy with custom tokenizer
         self.logger.info("🧠 Loading spaCy model and creating custom tokenizer...")
         try:
-            self.nlp = self._create_custom_tokenizer(spacy.load("en_core_web_sm"))
-            self.logger.info("✅ spaCy model loaded successfully")
+            nlp_model = spacy.load("en_core_web_sm")
         except Exception as e:
-            self.logger.error(f"❌ Failed to load spaCy model: {e}")
-            self.nlp = None
+            self.logger.warning(f"spaCy model 'en_core_web_sm' not available, falling back to blank 'en': {e}")
+            nlp_model = spacy.blank("en")
+        self.nlp = self._create_custom_tokenizer(nlp_model)
+        self.logger.info("✅ spaCy tokenizer initialized")
 
     async def load_document(self, content: bytes) -> None:
         """Load and analyze document using Azure Document Intelligence"""
@@ -286,7 +287,10 @@ class AzureOCRStrategy(OCRStrategy):
         """
         # Add the custom rule to the pipeline
         if "sentencizer" not in nlp.pipe_names:
-            nlp.add_pipe("sentencizer", before="parser")
+            try:
+                nlp.add_pipe("sentencizer", before="parser")
+            except Exception:
+                nlp.add_pipe("sentencizer")
 
         # Add custom sentence boundary detection
         if "custom_sentence_boundary" not in nlp.pipe_names:

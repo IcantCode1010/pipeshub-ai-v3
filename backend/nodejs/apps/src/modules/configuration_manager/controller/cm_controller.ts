@@ -132,7 +132,7 @@ export const createStorageConfig =
 
         case storageTypes.LOCAL.toLowerCase(): {
           const localConfig = {
-            mountName: config.mountName || 'PipesHub',
+            mountName: config.mountName || 'Aerointel',
             baseUrl: config.baseUrl || defaultConfig.endpoint,
           };
           await keyValueStoreService.set<string>(

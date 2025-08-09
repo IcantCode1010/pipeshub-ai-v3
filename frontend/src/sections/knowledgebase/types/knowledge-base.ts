@@ -50,7 +50,7 @@ export interface Filters {
   recordTypes?: string[];
   origin?: string[];
   indexingStatus?: string[];
-  department?: string[];
+  aircraft?: string[];
   moduleId?: string[];
   searchTags?: string[];
   appSpecificRecordType?: string[];

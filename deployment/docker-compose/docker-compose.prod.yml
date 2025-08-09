@@ -1,6 +1,6 @@
 services:
-  pipeshub-ai:
-    image: pipeshubai/pipeshub-ai:${IMAGE_TAG:-latest}
+  aerointel-ai:
+    image: aerointelai/aerointel-ai:${IMAGE_TAG:-latest}
     restart: always
     ports:
       - "8091:8091"
@@ -70,8 +70,8 @@ services:
       arango:
         condition: service_started
     volumes:
-      - pipeshub_data:/data/pipeshub
-      - pipeshub_root_local:/root/.local
+      - aerointel_data:/data/pipeshub
+      - aerointel_root_local:/root/.local
 
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -204,7 +204,7 @@ volumes:
     driver: local
   qdrant_storage:
     driver: local
-  pipeshub_data:
+  aerointel_data:
     driver: local
-  pipeshub_root_local:
+  aerointel_root_local:
     driver: local

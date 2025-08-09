@@ -44,7 +44,7 @@ export const searchKnowledgeBase = async (
       query: searchtext,
       limit: topK,
       filters: {
-        departments: filters.department || [],
+        aircraft: filters.aircraft || [],
         moduleIds: filters.moduleId || [],
         appSpecificRecordTypes: filters.appSpecificRecordType || [],
         apps:filters.app || []

@@ -1,15 +1,22 @@
 from typing import Any, Tuple
 
 import grpc
-from fastapi import APIRouter, Body, HTTPException, Request
+from fastapi import APIRouter, Body, HTTPException, Request, Depends
 from fastapi.responses import JSONResponse
 from qdrant_client.http import models
 
 from app.utils.aimodels import get_default_embedding_model, get_embedding_model
 from app.utils.llm import get_llm
 from app.utils.time_conversion import get_epoch_timestamp_in_ms
+from app.modules.retrieval.retrieval_service import RetrievalService
+from app.setups.query_setup import AppContainer
 
 router = APIRouter()
+
+async def get_retrieval_service(request: Request) -> RetrievalService:
+    container: AppContainer = request.app.container
+    retrieval_service = await container.retrieval_service()
+    return retrieval_service
 
 SPARSE_IDF = False
 
@@ -245,6 +252,54 @@ async def check_collection_info(
                 "error": f"Unexpected error checking Qdrant collection: {str(e)}",
                 "timestamp": get_epoch_timestamp_in_ms(),
             }
+        )
+
+@router.get("/aircraft-index")
+async def aircraft_index_health(
+    request: Request,
+    retrieval_service: RetrievalService = Depends(get_retrieval_service),
+) -> JSONResponse:
+    """
+    Verify that 'aircraft_canonical' payload index exists or can be ensured on the active collection.
+    This is non-destructive and will attempt to create the index if it is missing.
+    """
+    try:
+        client = retrieval_service.qdrant_client
+        collection = retrieval_service.collection_name
+
+        created = False
+        try:
+            client.create_payload_index(
+                collection_name=collection,
+                field_name="aircraft_canonical",
+                field_schema=models.KeywordIndexParams(
+                    type=models.KeywordIndexType.KEYWORD,
+                ),
+            )
+            created = True
+        except Exception:
+            # Most likely already exists or server returned a benign error
+            created = False
+
+        return JSONResponse(
+            status_code=200,
+            content={
+                "status": "healthy",
+                "collection": collection,
+                "index": "aircraft_canonical",
+                "created_now": created,
+                "message": ("Ensured aircraft_canonical index" if created else "Index exists or already ensured"),
+                "timestamp": get_epoch_timestamp_in_ms(),
+            },
+        )
+    except Exception as e:
+        return JSONResponse(
+            status_code=500,
+            content={
+                "status": "not healthy",
+                "error": f"Aircraft index health check failed: {str(e)}",
+                "timestamp": get_epoch_timestamp_in_ms(),
+            },
         )
 
 @router.post("/embedding-health-check")

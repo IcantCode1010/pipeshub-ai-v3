@@ -1,7 +1,10 @@
-export interface Department {
+export interface Aircraft {
   _id: string;
   name: string;
 }
+
+// Keep alias for backward compatibility during migration
+export interface Department extends Aircraft {}
 
 export interface AppSpecificRecordType {
   _id: string;
@@ -28,7 +31,7 @@ export interface InitialContext {
   recordId: string;
   recordName: string;
   recordType: string;
-  departments: string[];
+  aircraft: string;
   modules: string[];
   categories: string[];
 }
@@ -52,7 +55,7 @@ export interface MetadataItem {
   name: string;
 }
 export interface Metadata {
-  departments: MetadataItem[];
+  aircraft: MetadataItem[];
   categories: MetadataItem[];
   subcategories1: MetadataItem[];
   subcategories2: MetadataItem[];
@@ -81,7 +84,7 @@ export interface Record {
   version: number;
   fileRecord: FileRecord | null;
   mailRecord: MailRecord | null;
-  departments?: Array<{ _id: string; name: string }>;
+  aircraft?: string;
   appSpecificRecordType?: Array<{ _id: string; name: string }>;
   modules?: Array<{ _id: string; name: string }>;
   searchTags?: Array<{ _id: string; name: string }>;

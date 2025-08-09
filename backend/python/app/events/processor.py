@@ -797,7 +797,7 @@ class Processor:
                     {
                         "text": s["content"].strip(),
                         "metadata": {
-                            **ocr_result.get("metadata"),
+                            **(ocr_result.get("metadata") or {}),
                             "recordId": recordId,
                             "blockText": s["block_text"],
                             "blockType": BLOCK_TYPE_MAP.get(s.get("block_type", 0)),
@@ -849,6 +849,15 @@ class Processor:
                 "metadata": metadata,
             }
 
+        except ValueError as e:
+            if "corrupted" in str(e).lower():
+                self.logger.error(f"❌ Corrupted PDF detected - skipping document: {str(e)}")
+                # Mark record as failed due to corruption and continue processing other documents
+                await self._mark_record_as_failed(recordId, f"PDF corruption: {str(e)}")
+                return {"status": "failed", "reason": "corrupted_pdf", "message": str(e)}
+            else:
+                self.logger.error(f"❌ ValueError processing PDF document: {str(e)}")
+                raise
         except Exception as e:
             self.logger.error(f"❌ Error processing PDF document: {str(e)}")
             raise
@@ -2185,3 +2194,56 @@ class Processor:
         )
 
         return {"status": "success", "message": "PPT processed successfully"}
+
+    async def _mark_record_as_failed(self, record_id: str, reason: str) -> None:
+        """Mark a record as failed due to processing issues
+        
+        Args:
+            record_id: The ID of the record that failed
+            reason: The reason for failure
+        """
+        try:
+            self.logger.info(f"📝 Marking record {record_id} as failed: {reason}")
+            # Get the current record and update its status
+            record = await self.arango_service.get_document(record_id, CollectionNames.RECORDS.value)
+            if record:
+                # Create a clean copy with only the fields we need to update
+                updated_record = dict(record)
+                
+                # Ensure required fields exist and have proper types
+                updated_record.update({
+                    "indexingStatus": "FAILED",
+                    "failureReason": str(reason)[:500],  # Truncate reason to avoid length issues
+                    "isDirty": False
+                })
+                
+                # Clean up any None values that might cause schema issues
+                # Keep only essential fields for the update
+                essential_fields = [
+                    "_key", "_id", "_rev", "name", "extension", "mimeType", 
+                    "orgId", "source", "indexingStatus", "failureReason", "isDirty",
+                    "createdAt", "modifiedAt", "size", "url", "recordId"
+                ]
+                
+                clean_record = {}
+                for field in essential_fields:
+                    if field in updated_record and updated_record[field] is not None:
+                        clean_record[field] = updated_record[field]
+                
+                # Ensure _key is present (required for upsert)
+                if "_key" not in clean_record and "recordId" in updated_record:
+                    clean_record["_key"] = updated_record["recordId"]
+                elif "_key" not in clean_record:
+                    clean_record["_key"] = record_id
+                
+                self.logger.debug(f"🔧 Updating record with fields: {list(clean_record.keys())}")
+                
+                await self.arango_service.batch_upsert_nodes(
+                    [clean_record], CollectionNames.RECORDS.value
+                )
+                self.logger.info(f"✅ Successfully marked record {record_id} as failed")
+            else:
+                self.logger.warning(f"⚠️ Record {record_id} not found - cannot mark as failed")
+        except Exception as e:
+            self.logger.error(f"❌ Failed to mark record as failed: {str(e)}")
+            self.logger.error(f"❌ Record ID: {record_id}, Reason: {reason}")

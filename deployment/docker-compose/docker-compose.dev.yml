@@ -1,6 +1,6 @@
 services:
-  pipeshub-ai:
-    image: pipeshub-ai:latest
+  aerointel-ai:
+    image: aerointel-ai:latest
     restart: always
     build:
       context: ../../
@@ -10,6 +10,14 @@ services:
       - "8088:8088"
       - "3000:3000"
       - "8001:8000"
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+          cpus: '2.0'
+        reservations:
+          memory: 2G
+          cpus: '1.0'
     environment:
       # Core environment settings
       - NODE_ENV=${NODE_ENV:-development}
@@ -59,6 +67,17 @@ services:
       - QDRANT_PORT=6333
 
       - OLLAMA_API_URL=http://host.docker.internal:11434
+
+      # LLM Provider API Keys
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - AZURE_OPENAI_API_KEY=${AZURE_OPENAI_API_KEY:-}
+      - AZURE_OPENAI_ENDPOINT=${AZURE_OPENAI_ENDPOINT:-}
+      - COHERE_API_KEY=${COHERE_API_KEY:-}
+      - MISTRAL_API_KEY=${MISTRAL_API_KEY:-}
+      - VOYAGE_API_KEY=${VOYAGE_API_KEY:-}
+      - JINA_API_KEY=${JINA_API_KEY:-}
     depends_on:
       qdrant:
         condition: service_healthy
@@ -73,8 +92,8 @@ services:
       arango:
         condition: service_started
     volumes:
-      - pipeshub_data:/data/pipeshub
-      - pipeshub_root_local:/root/.local
+      - aerointel_data:/data/pipeshub
+      - aerointel_root_local:/root/.local
     extra_hosts:
       - "host.docker.internal:host-gateway"
 
@@ -116,10 +135,10 @@ services:
     volumes:
       - arango_data:/var/lib/arangodb3
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8529/_api/version"]
-      interval: 5s
-      timeout: 3s
-      retries: 5
+      test: ["CMD-SHELL", "pgrep arangod || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
 
   etcd:
     image: quay.io/coreos/etcd:v3.5.17
@@ -205,7 +224,7 @@ volumes:
     driver: local
   qdrant_storage:
     driver: local
-  pipeshub_data:
+  aerointel_data:
     driver: local
-  pipeshub_root_local:
+  aerointel_root_local:
     driver: local

@@ -23,7 +23,7 @@ const SIDEBAR_COLLAPSED_WIDTH = 64;
 // Create a function to initialize empty filters
 const createEmptyFilters = (): Filters => ({
   indexingStatus: [],
-  department: [],
+  aircraft: [],
   moduleId: [],
   searchTags: [],
   appSpecificRecordType: [],

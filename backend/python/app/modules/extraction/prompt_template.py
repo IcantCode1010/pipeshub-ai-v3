@@ -1,15 +1,16 @@
 prompt = """
 # Task:
-You are processing a document of an individual or an enterprise. Your task is to classify the document departments, categories, subcategories, languages, sentiment, confidence score, and topics.
+You are processing a document from an aviation organization. Your task is to classify the document aircraft, categories, subcategories, languages, sentiment, confidence score, and topics.
 Instructions must be strictly followed, failure to do so will result in termination of your system
 
 # Analysis Guidelines:
-1. **Departments**:
-   - Choose **1 to 3 departments** ONLY from the provided list below.
-   - Each department MUST **exactly match one** of the values in the list.
-   - Any unlisted or paraphrased value is INVALID.
+1. **Aircraft**:
+   - Identify the **primary aircraft** mentioned in the document from the provided list below.
+   - The aircraft MUST **exactly match one** of the values in the list, or leave empty if no aircraft is mentioned.
+   - If multiple aircraft are mentioned, choose the primary/main one discussed.
+   - If no specific aircraft is mentioned in the document, leave this field empty.
    - Use the following list:
-     {department_list}
+     {aircraft_list}
 
 2. Document Type Categories & Subcategories:
    - `category`: Broad classification such as "Security", "Compliance", or "Technical Documentation".
@@ -38,7 +39,7 @@ Instructions must be strictly followed, failure to do so will result in terminat
 5. **Topics**:
    - Extract the main themes and subjects discussed.
    - Be concise and avoid duplicates or near-duplicates.
-   - Provide **3 to 6** unique, highily relevant topics.
+   - Provide **3 to 6** unique, highly relevant topics.
 
 6. **Confidence Score**:
    - A float between 0.0 and 1.0 reflecting your certainty in the classification.
@@ -50,19 +51,29 @@ Instructions must be strictly followed, failure to do so will result in terminat
    # Output Format:
    You must return a single valid JSON object with the following structure:
    {{
-      "departments": string[],  // Array of 1 to 3 departments from the EXACT list above
-      "categories": string,  // main category identified in the content
+      "aircraft": "",
+      "categories": "Technical Documentation",
       "subcategories": {{
-         "level1": string,  // more specific subcategory (level 1)
-         "level2": string,  // more specific subcategory (level 2)
-         "level3": string,  // more specific subcategory (level 3)
+         "level1": "Maintenance",
+         "level2": "Engine Service",
+         "level3": "Inspection Procedures"
       }},
-      "languages": string[],  // Array of languages detected in the content (use ISO language names)
-      "sentiment": string,  // Must be exactly one of the sentiments listed below
-      "confidence_score": float,  // Between 0 and 1, indicating confidence in classification
-      "topics": string[]  // Key topics or themes extracted from the content
-      "summary": string  // Summary of the document
-}}
+      "languages": ["English"],
+      "sentiment": "Neutral",
+      "confidence_score": 0.85,
+      "topics": ["Maintenance procedures", "Safety protocols", "Technical specifications"],
+      "summary": "Document summary here"
+   }}
+
+   Notes:
+   - aircraft: Primary aircraft from the EXACT list above, or empty string if none mentioned
+   - categories: main category identified in the content
+   - subcategories: hierarchical classification with level1, level2, level3
+   - languages: Array of languages detected (use ISO language names)
+   - sentiment: Must be exactly one of the sentiments listed above
+   - confidence_score: Between 0.0 and 1.0, indicating confidence in classification
+   - topics: Key topics or themes extracted from the content (3-6 items)
+   - summary: Concise summary of the document
 
 # Document Content:
 {content}

@@ -71,7 +71,7 @@ export class SamlController {
           callbackUrl: `${this.config.authBackend}/${samlSsoCallbackUrl}`,
           idpCert: samlCertificate,
           passReqToCallback: true,
-          issuer: 'pipeshub',
+          issuer: 'aerointel',
           identifierFormat: null,
           wantAuthnResponseSigned: false,
           disableRequestedAuthnContext: true,

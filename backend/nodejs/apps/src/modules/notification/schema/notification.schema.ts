@@ -8,7 +8,7 @@ export interface INotification extends Document {
   type: string;
   link: string;
   status: "Read" | "Unread" | "Archived";
-  origin: "Internal Service" | "External Service" | "PipesHub";
+  origin: "Internal Service" | "External Service" | "Aerointel";
   initiator?: mongoose.Types.ObjectId;
   externalInitiator?: string;
   assignedTo: mongoose.Types.ObjectId;
@@ -46,7 +46,7 @@ const notificationSchema = new Schema<INotification>(
     },
     origin: {
       type: String,
-      enum: ["Internal Service", "External Service", "PipesHub"],
+      enum: ["Internal Service", "External Service", "Aerointel"],
       default: "Internal Service",
     },
     initiator: {

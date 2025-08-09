@@ -26,7 +26,7 @@ from app.config.configuration_service import (
 )
 from app.config.utils.named_constants.arangodb_constants import (
     CollectionNames,
-    DepartmentNames,
+    AircraftNames,
 )
 from app.config.utils.named_constants.http_status_code_constants import HttpStatusCode
 from app.modules.extraction.prompt_template import prompt
@@ -44,8 +44,8 @@ class SubCategories(BaseModel):
 
 
 class DocumentClassification(BaseModel):
-    departments: List[str] = Field(
-        description="The list of departments this document belongs to", max_items=3
+    aircraft: str = Field(
+        description="The primary aircraft this document is about", default=""
     )
     categories: str = Field(description="Main category this document belongs to")
     subcategories: SubCategories = Field(
@@ -100,7 +100,25 @@ class DomainExtractor:
     )
     async def _call_llm(self, messages) -> dict | None:
         """Wrapper for LLM calls with retry logic"""
-        return await self.llm.ainvoke(messages)
+        try:
+            self.logger.info(f"🔍 DEBUG: About to call LLM with {len(messages)} messages")
+            self.logger.info(f"🔍 DEBUG: LLM provider: {getattr(self.llm, 'model_name', 'unknown')}")
+            if hasattr(self.llm, 'api_key'):
+                api_key_preview = self.llm.api_key[:10] + "..." if self.llm.api_key else "None"
+                self.logger.info(f"🔍 DEBUG: API key exists: {bool(self.llm.api_key)}, preview: {api_key_preview}")
+            
+            response = await self.llm.ainvoke(messages)
+            self.logger.info(f"🔍 DEBUG: LLM call successful, response type: {type(response)}")
+            return response
+        except Exception as e:
+            self.logger.error(f"🔍 DEBUG: LLM call failed with error: {str(e)}")
+            self.logger.error(f"🔍 DEBUG: Error type: {type(e)}")
+            if hasattr(e, 'response'):
+                self.logger.error(f"🔍 DEBUG: HTTP response status: {getattr(e.response, 'status_code', 'unknown')}")
+                if hasattr(e.response, 'text'):
+                    error_text = e.response.text[:500] if len(e.response.text) > 500 else e.response.text
+                    self.logger.error(f"🔍 DEBUG: HTTP response text: {error_text}")
+            raise
 
     async def find_similar_topics(self, new_topic: str) -> str:
         """
@@ -192,13 +210,13 @@ class DomainExtractor:
         self.llm = await get_llm(self.config_service)
 
         try:
-            self.logger.info(f"🎯 Extracting departments for org_id: {org_id}")
-            departments = await self.arango_service.get_departments(org_id)
-            if not departments:
-                departments = [dept.value for dept in DepartmentNames]
+            self.logger.info(f"🎯 Extracting aircraft for org_id: {org_id}")
+            aircraft = await self.arango_service.get_aircraft(org_id)
+            if not aircraft:
+                aircraft = [air.value for air in AircraftNames]
 
-            # Format department list for the prompt
-            department_list = "\n".join(f'     - "{dept}"' for dept in departments)
+            # Format aircraft list for the prompt
+            aircraft_list = "\n".join(f'     - "{air}"' for air in aircraft)
 
             # Format sentiment list for the prompt
             sentiment_list = "\n".join(
@@ -206,14 +224,56 @@ class DomainExtractor:
             )
 
             filled_prompt = prompt.replace(
-                "{department_list}", department_list
+                "{aircraft_list}", aircraft_list
             ).replace("{sentiment_list}", sentiment_list)
             self.prompt_template = PromptTemplate.from_template(filled_prompt)
 
-            formatted_prompt = self.prompt_template.format(content=content)
+            # Check content length first to identify if it's a token limit issue
+            content_length = len(content)
+            self.logger.info(f"🔍 DEBUG: Original content length: {content_length} characters")
+            
+            # If content is very long, truncate it for testing
+            if content_length > 100000:  # 100k characters is roughly 25k tokens
+                self.logger.warning(f"⚠️ Content is very long ({content_length} chars), truncating to 50k for testing")
+                test_content = content[:50000] + "\n\n... [CONTENT TRUNCATED FOR TESTING] ..."
+            else:
+                test_content = content
+            
+            formatted_prompt = self.prompt_template.format(content=test_content)
             self.logger.info("🎯 Prompt formatted successfully")
+            
+            # Log total prompt length
+            prompt_length = len(formatted_prompt)
+            estimated_tokens = prompt_length // 4  # Rough estimate: 4 chars per token
+            self.logger.info(f"🔍 DEBUG: Final prompt length: {prompt_length} characters (~{estimated_tokens} tokens)")
 
             messages = [HumanMessage(content=formatted_prompt)]
+            
+            # Debug logging - log the message structure and content length
+            self.logger.info(f"🔍 DEBUG: Message structure: {type(messages[0])}")
+            self.logger.info(f"🔍 DEBUG: Content length: {len(formatted_prompt)} characters")
+            self.logger.info(f"🔍 DEBUG: LLM type: {type(self.llm)}")
+            
+            # OpenAI-specific debugging
+            if hasattr(self.llm, 'model_name'):
+                self.logger.info(f"🔍 DEBUG: Model name: {self.llm.model_name}")
+            if hasattr(self.llm, 'model'):
+                self.logger.info(f"🔍 DEBUG: Model: {self.llm.model}")
+            if hasattr(self.llm, 'temperature'):
+                self.logger.info(f"🔍 DEBUG: Temperature: {self.llm.temperature}")
+            if hasattr(self.llm, 'max_tokens'):
+                self.logger.info(f"🔍 DEBUG: Max tokens: {self.llm.max_tokens}")
+            
+            # Log a sample of the prompt to verify formatting
+            prompt_preview = formatted_prompt[:300] + "..." if len(formatted_prompt) > 300 else formatted_prompt
+            self.logger.info(f"🔍 DEBUG: Prompt preview: {prompt_preview}")
+            
+            # Check for potential problematic characters in prompt
+            if any(ord(c) > 127 for c in formatted_prompt[:1000]):
+                self.logger.warning("⚠️ Non-ASCII characters detected in prompt")
+            if '"' in formatted_prompt and '\"' in formatted_prompt:
+                self.logger.warning("⚠️ Mixed quote types detected in prompt")
+            
             # Use retry wrapper for LLM call
             response = await self._call_llm(messages)
 
@@ -315,37 +375,35 @@ class DomainExtractor:
                 record_id, CollectionNames.RECORDS.value
             )
             doc = dict(record)
-            # Create relationships with departments
-            for department in metadata.departments:
+            # Create relationship with aircraft (if aircraft is specified)
+            if metadata.aircraft:
                 try:
-                    dept_query = f"FOR d IN {CollectionNames.DEPARTMENTS.value} FILTER d.departmentName == @department RETURN d"
+                    aircraft_query = f"FOR a IN {CollectionNames.AIRCRAFT.value} FILTER a.aircraftName == @aircraft RETURN a"
                     cursor = self.arango_service.db.aql.execute(
-                        dept_query, bind_vars={"department": department}
+                        aircraft_query, bind_vars={"aircraft": metadata.aircraft}
                     )
-                    dept_doc = cursor.next()
-                    self.logger.info(f"🚀 Department: {dept_doc}")
+                    aircraft_doc = cursor.next()
+                    self.logger.info(f"🚀 Aircraft: {aircraft_doc}")
 
-                    if dept_doc:
+                    if aircraft_doc:
                         edge = {
                             "_from": f"{CollectionNames.RECORDS.value}/{record_id}",
-                            "_to": f"{CollectionNames.DEPARTMENTS.value}/{dept_doc['_key']}",
+                            "_to": f"{CollectionNames.AIRCRAFT.value}/{aircraft_doc['_key']}",
                             "createdAtTimestamp": get_epoch_timestamp_in_ms(),
                         }
                         await self.arango_service.batch_create_edges(
-                            [edge], CollectionNames.BELONGS_TO_DEPARTMENT.value
+                            [edge], CollectionNames.BELONGS_TO_AIRCRAFT.value
                         )
                         self.logger.info(
-                            f"🔗 Created relationship between document {record_id} and department {department}"
+                            f"🔗 Created relationship between document {record_id} and aircraft {metadata.aircraft}"
                         )
 
                 except StopIteration:
-                    self.logger.warning(f"⚠️ No department found for: {department}")
-                    continue
+                    self.logger.warning(f"⚠️ No aircraft found for: {metadata.aircraft}")
                 except Exception as e:
                     self.logger.error(
-                        f"❌ Error creating relationship with department {department}: {str(e)}"
+                        f"❌ Error creating relationship with aircraft {metadata.aircraft}: {str(e)}"
                     )
-                    continue
 
             # Handle single category
             category_query = f"FOR c IN {CollectionNames.CATEGORIES.value} FILTER c.name == @name RETURN c"
@@ -597,7 +655,7 @@ class DomainExtractor:
 
             doc.update(
                 {
-                    "departments": [dept for dept in metadata.departments],
+                    "aircraft": metadata.aircraft,
                     "categories": metadata.categories,
                     "subcategoryLevel1": metadata.subcategories.level1,
                     "subcategoryLevel2": metadata.subcategories.level2,

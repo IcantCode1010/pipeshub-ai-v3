@@ -23,7 +23,7 @@ export type ConfigValue = {
 // ----------------------------------------------------------------------
 
 export const CONFIG: ConfigValue = {
-  appName: 'PipesHub',
+  appName: 'Aerointel Solutions',
   appVersion: packageJson.version,
   backendUrl: import.meta.env.VITE_BACKEND_URL ?? '',
   notificationBackendUrl: import.meta.env.VITE_NOTIFICATION_BACKEND_URL ?? '',

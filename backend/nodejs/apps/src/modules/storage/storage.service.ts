@@ -69,7 +69,7 @@ export class StorageService {
   private extractLocalStorageCredentials() {
     const configuration = this.config as LocalStorageConfig;
     return {
-      mountName: configuration.mountName || 'PipesHub',
+      mountName: configuration.mountName || 'Aerointel',
       baseUrl: configuration.baseUrl || this.defaultConfig.endpoint,
     };
   }

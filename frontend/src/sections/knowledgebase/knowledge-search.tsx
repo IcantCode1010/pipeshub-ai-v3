@@ -809,8 +809,8 @@ const KnowledgeSearch = ({
                                   />
                                 ))}
 
-                              {result.metadata.departments &&
-                                result.metadata.departments.slice(0, 2).map((dept) => (
+                              {result.metadata.aircraft &&
+                                [result.metadata.aircraft].slice(0, 2).map((dept) => (
                                   <Chip
                                     key={dept}
                                     label={dept}
@@ -825,9 +825,9 @@ const KnowledgeSearch = ({
                                 ))}
 
                               {((result.metadata.topics?.length || 0) > 3 ||
-                                (result.metadata.departments?.length || 0) > 2) && (
+                                (result.metadata.aircraft ? 1 : 0) > 2) && (
                                 <Chip
-                                  label={`+${(result.metadata.topics?.length || 0) - 3 + ((result.metadata.departments?.length || 0) - 2)} more`}
+                                  label={`+${(result.metadata.topics?.length || 0) - 3 + ((result.metadata.aircraft ? 1 : 0) - 2)} more`}
                                   size="small"
                                   sx={{
                                     height: 20,

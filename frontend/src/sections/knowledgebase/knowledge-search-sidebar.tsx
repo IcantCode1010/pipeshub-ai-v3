@@ -43,7 +43,7 @@ import {
 // import { fetchModules, fetchDepartments, fetchRecordCategories } from './utils';
 
 import type { Modules } from './types/modules';
-import type { Departments } from './types/departments';
+import type { Aircraft } from './types/aircraft';
 import type { RecordCategories } from './types/record-categories';
 import type { Filters, KnowledgeSearchSideBarProps } from './types/knowledge-base';
 
@@ -372,7 +372,7 @@ export default function KnowledgeSearchSideBar({
   const theme = useTheme();
   const navigate = useNavigate();
   const [open, setOpen] = useState<boolean>(true);
-  const [departments, setDepartments] = useState<Departments[]>([]);
+  const [aircraft, setAircraft] = useState<Aircraft[]>([]);
   const [recordCategories, setRecordCategories] = useState<RecordCategories[]>([]);
   const [modules, setModules] = useState<Modules[]>([]);
   const [searchTerm, setSearchTerm] = useState<string>('');
@@ -380,7 +380,7 @@ export default function KnowledgeSearchSideBar({
   const isFilterChanging = useRef(false);
   const [expandedSections, setExpandedSections] = useState<{ [key: string]: boolean }>({
     apps: true,
-    departments: false,
+    aircraft: false,
     modules: false,
     categories: false,
   });
@@ -394,149 +394,16 @@ export default function KnowledgeSearchSideBar({
     const fetchData = async () => {
       setLoading(true);
       try {
-        // const [deptData, catData, moduleData] = await Promise.all([
-        //   // fetchDepartments(),
+        // const [aircraftData, catData, moduleData] = await Promise.all([
+        //   // fetchAircraft(),
         //   // fetchRecordCategories(),
         //   // fetchModules(),
         // ]);
-        // setDepartments();
+        // setAircraft();
         // setRecordCategories();
         // setModules();
       } catch (error) {
         console.error('Error fetching filter data:', error);
-        // Use fallback mock data in case of API error
-        setDepartments([
-          {
-            _id: 'engineering',
-            name: 'Engineering',
-            tag: 'eng',
-            origin: 'system',
-            description: '',
-            orgId: '',
-            isDeleted: false,
-            __v: 0,
-            createdAt: '',
-            updatedAt: '',
-          },
-          {
-            _id: 'product',
-            name: 'Product Management',
-            tag: 'pm',
-            origin: 'system',
-            description: '',
-            orgId: '',
-            isDeleted: false,
-            __v: 0,
-            createdAt: '',
-            updatedAt: '',
-          },
-          {
-            _id: 'design',
-            name: 'Design',
-            tag: 'design',
-            origin: 'system',
-            description: '',
-            orgId: '',
-            isDeleted: false,
-            __v: 0,
-            createdAt: '',
-            updatedAt: '',
-          },
-          {
-            _id: 'marketing',
-            name: 'Marketing',
-            tag: 'mktg',
-            origin: 'system',
-            description: '',
-            orgId: '',
-            isDeleted: false,
-            __v: 0,
-            createdAt: '',
-            updatedAt: '',
-          },
-          {
-            _id: 'sales',
-            name: 'Sales',
-            tag: 'sales',
-            origin: 'system',
-            description: '',
-            orgId: '',
-            isDeleted: false,
-            __v: 0,
-            createdAt: '',
-            updatedAt: '',
-          },
-        ]);
-        setRecordCategories([
-          {
-            _id: 'technical',
-            name: 'Technical Documentation',
-            tag: 'tech',
-            origin: 'system',
-            description: '',
-            orgId: '',
-            isDeleted: false,
-            __v: 0,
-            createdAt: '',
-            updatedAt: '',
-          },
-          {
-            _id: 'product',
-            name: 'Product Documentation',
-            tag: 'prod',
-            origin: 'system',
-            description: '',
-            orgId: '',
-            isDeleted: false,
-            __v: 0,
-            createdAt: '',
-            updatedAt: '',
-          },
-          {
-            _id: 'process',
-            name: 'Process Documentation',
-            tag: 'proc',
-            origin: 'system',
-            description: '',
-            orgId: '',
-            isDeleted: false,
-            __v: 0,
-            createdAt: '',
-            updatedAt: '',
-          },
-        ]);
-        setModules([
-          {
-            _id: 'module1',
-            name: 'User Management',
-            description: '',
-            orgId: '',
-            isDeleted: false,
-            createdAt: '',
-            updatedAt: '',
-            __v: 0,
-          },
-          {
-            _id: 'module2',
-            name: 'Authentication',
-            description: '',
-            orgId: '',
-            isDeleted: false,
-            createdAt: '',
-            updatedAt: '',
-            __v: 0,
-          },
-          {
-            _id: 'module3',
-            name: 'Reporting',
-            description: '',
-            orgId: '',
-            isDeleted: false,
-            createdAt: '',
-            updatedAt: '',
-            __v: 0,
-          },
-        ]);
       } finally {
         setLoading(false);
       }
@@ -610,8 +477,8 @@ export default function KnowledgeSearchSideBar({
   // Get filter item names by IDs
   const getFilterName = (type: keyof Filters, id: string): string => {
     switch (type) {
-      case 'department':
-        return departments.find((d) => d._id === id)?.name || id;
+      case 'aircraft':
+        return aircraft.find((a) => a._id === id)?.name || id;
       case 'moduleId':
         return modules.find((m) => m._id === id)?.name || id;
       case 'appSpecificRecordType':
@@ -652,7 +519,7 @@ export default function KnowledgeSearchSideBar({
 
     requestAnimationFrame(() => {
       onFilterChange({
-        department: [],
+        aircraft: [],
         moduleId: [],
         appSpecificRecordType: [],
         app: [],
@@ -737,14 +604,14 @@ export default function KnowledgeSearchSideBar({
           </Badge>
         </IconButtonStyled>
       </Tooltip>
-      <Tooltip title="Department Filters" placement="right">
+      <Tooltip title="Aircraft Filters" placement="right">
         <IconButtonStyled
           color="primary"
           sx={{ mb: 2 }}
-          onClick={() => handleCollapsedFilterClick('departments', 'department')}
+          onClick={() => handleCollapsedFilterClick('aircraft', 'aircraft')}
           disableRipple // Disable ripple effect to reduce flickering
         >
-          <Badge badgeContent={getActiveFilterCount('department')} color="primary">
+          <Badge badgeContent={getActiveFilterCount('aircraft')} color="primary">
             <Icon icon={officeBuildingIcon} />
           </Badge>
         </IconButtonStyled>
@@ -985,13 +852,13 @@ export default function KnowledgeSearchSideBar({
             )}
           />
 
-          {/* <FilterSectionComponent
-            id="departments"
+          <FilterSectionComponent
+            id="aircraft"
             icon={officeBuildingIcon}
-            label="Departments"
-            filterType="department"
-            items={departments}
-          /> */}
+            label="Aircraft"
+            filterType="aircraft"
+            items={aircraft}
+          />
 
           {/* <FilterSectionComponent
             id="modules"

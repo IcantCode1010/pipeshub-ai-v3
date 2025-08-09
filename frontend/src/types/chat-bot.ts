@@ -7,7 +7,7 @@ export interface ApiCitation {
     subcategoryLevel2: string;
     subcategoryLevel3: string;
     categories: string;
-    departments: string[];
+    aircraft: string;
     connector: string;
     recordType: string;
     orgId: string;
@@ -52,7 +52,7 @@ export interface Metadata {
   subcategoryLevel2: string;
   subcategoryLevel3: string;
   categories: string;
-  departments: string[];
+  aircraft: string;
   connector: string;
   recordType: string;
   orgId: string;

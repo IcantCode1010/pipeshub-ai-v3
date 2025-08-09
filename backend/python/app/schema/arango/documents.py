@@ -307,18 +307,18 @@ record_group_schema = {
     "message": "Document does not match the record group schema.",
 }
 
-department_schema = {
+aircraft_schema = {
     "rule": {
         "type": "object",
         "properties": {
-            "departmentName": {"type": "string", "minLength": 1},
+            "aircraftName": {"type": "string", "minLength": 1},
             "orgId": {"type": ["string", "null"]},
         },
-        "required": ["departmentName"],
+        "required": ["aircraftName"],
         "additionalProperties": False,
     },
     "level": "strict",
-    "message": "Document does not match the department schema.",
+    "message": "Document does not match the aircraft schema.",
 }
 
 kb_schema = {

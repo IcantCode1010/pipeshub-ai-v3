@@ -720,21 +720,53 @@ export const performHardDelete = async (
     const hardDeleteResponse =
       (await hardDeleteCommand.execute()) as AIServiceResponse<IServiceDeleteRecordResponse>;
 
-    if (!hardDeleteResponse || hardDeleteResponse.statusCode !== 200) {
+    const statusCode = hardDeleteResponse?.statusCode;
+    const data = hardDeleteResponse?.data as any;
+
+    // Extract textual message if present
+    const rawMessage =
+      (data?.message) ||
+      (typeof data?.response === 'string' ? data.response : data?.response?.message) ||
+      '';
+
+    const msgLower = typeof rawMessage === 'string' ? rawMessage.toLowerCase() : '';
+
+    // Treat idempotent conditions as success
+    const isIdempotentSuccess =
+      statusCode === 404 ||
+      statusCode === 202 ||
+      statusCode === 204 ||
+      (msgLower.includes('not found') ||
+        msgLower.includes('no such key') ||
+        msgLower.includes('nosuchkey') ||
+        msgLower.includes('missing'));
+
+    if (!hardDeleteResponse || (statusCode !== 200 && !isIdempotentSuccess)) {
       logger.error('Failed to hard delete record', {
         recordId,
-        statusCode: hardDeleteResponse?.statusCode,
+        statusCode,
+        responseData: hardDeleteResponse?.data,
         requestId,
       });
 
+      const errorMessage =
+        rawMessage ||
+        'Unknown error from deletion service';
+
       throw new InternalServerError(
-        'Failed to hard delete record',
-        hardDeleteResponse?.data,
+        `Hard delete failed: ${errorMessage}`,
+        {
+          statusCode,
+          serviceResponse: hardDeleteResponse?.data,
+          recordId,
+        },
       );
     }
 
-    logger.info('Record hard-deleted successfully', {
+    logger.info('Record hard-deleted successfully (idempotent acceptance possible)', {
       recordId,
+      statusCode: hardDeleteResponse?.statusCode,
+      responseData: hardDeleteResponse?.data,
       requestId,
     });
 
@@ -743,6 +775,8 @@ export const performHardDelete = async (
     logger.error('Error in hard delete operation', {
       recordId,
       error: error.message,
+      errorStack: error.stack,
+      errorCause: error.cause,
       requestId,
     });
 
@@ -759,6 +793,19 @@ export const performHardDelete = async (
 
     if (error.message?.includes('User has no access to this record')) {
       throw new UnauthorizedError('User has no access to this record');
+    }
+
+    // Handle specific relationship constraint errors
+    if (error.message?.includes('BELONGS_TO_DEPARTMENT') || 
+        error.message?.includes('Failed to delete node')) {
+      throw new InternalServerError(
+        `Cannot delete record due to existing relationships. The record may have dependencies that prevent deletion.`,
+        {
+          originalError: error.message,
+          recordId,
+          suggestedAction: 'Try soft delete or remove dependencies first',
+        }
+      );
     }
 
     throw error;
@@ -843,11 +890,9 @@ export const deleteRecord =
         // For KB records, verify KB access
         if (!isConnectorRecord) {
           try {
-            // Verify user has delete permission at KB level
+            // Verify user has delete permission at KB level (OWNER only)
             await recordRelationService.validateUserKbAccess(userId, orgId, [
               'OWNER',
-              'WRITER',
-              'FILEORGANIZER',
             ]);
           } catch (error) {
             logger.warn('User lacks KB permissions for record deletion', {
@@ -878,40 +923,97 @@ export const deleteRecord =
             );
           } catch (hardDeleteError: any) {
             logger.error(
-              'Hard delete operation failed, falling back to soft delete',
+              'Hard delete operation failed, attempting soft delete fallback',
               {
                 recordId,
                 error: hardDeleteError.message,
+                errorType: hardDeleteError.constructor.name,
+                indexingStatus: existingRecord?.record?.indexingStatus,
                 requestId: req.context?.requestId,
               },
             );
-            logger.error('Failed to hard-deleted record', {
-              recordId,
-              error: hardDeleteError,
-              requestId: req.context?.requestId,
-            });
-            throw hardDeleteError;
+
+            // Check if this is a relationship constraint error
+            const isRelationshipError = hardDeleteError.message?.includes('BELONGS_TO') || 
+                                       hardDeleteError.message?.includes('constraint');
+            
+            // Check if record is stuck in processing
+            const isStuckRecord = existingRecord?.record?.indexingStatus === 'IN_PROGRESS';
+
+            const enableSoftDeleteFallback = process.env.KB_DELETE_SOFT_FALLBACK === 'true';
+            if (enableSoftDeleteFallback && (isRelationshipError || isStuckRecord)) {
+              logger.info('Attempting soft delete fallback due to constraints or stuck processing', {
+                recordId,
+                isRelationshipError,
+                isStuckRecord,
+                requestId: req.context?.requestId,
+              });
+
+              try {
+                // Attempt soft delete fallback using external record key
+                const recordKey = existingRecord?.record?._key || recordId;
+                await recordRelationService.softDeleteRecord(recordKey, userId);
+                
+                logger.info('Soft delete fallback succeeded', {
+                  recordId,
+                  userId,
+                  requestId: req.context?.requestId,
+                });
+
+                res.status(200).json({
+                  message: 'Record deleted successfully (soft delete due to constraints)',
+                  meta: {
+                    requestId: req.context?.requestId,
+                    timestamp: new Date().toISOString(),
+                    deletionMethod: 'soft_delete_fallback',
+                  },
+                });
+
+                return; // Exit early on successful soft delete
+              } catch (softDeleteError: any) {
+                logger.error('Soft delete fallback also failed', {
+                  recordId,
+                  hardDeleteError: hardDeleteError.message,
+                  softDeleteError: softDeleteError.message,
+                  requestId: req.context?.requestId,
+                });
+                
+                // Provide more detailed error message
+                throw new InternalServerError(
+                  `Failed to delete record: Hard delete failed due to ${isRelationshipError ? 'relationship constraints' : 'processing state'}, ` +
+                  `and soft delete fallback also failed. Please try again or contact support.`,
+                  {
+                    hardDeleteError: hardDeleteError.message,
+                    softDeleteError: softDeleteError.message,
+                    recordId,
+                    indexingStatus: existingRecord?.record?.indexingStatus,
+                  }
+                );
+              }
+            } else {
+              // For other types of errors, don't attempt fallback
+              throw hardDeleteError;
+            }
           }
 
-          // If hard delete was successful, publish the event and send response
+          // If hard delete was successful, mark DB record as deleted and send response
           if (hardDeleteSuccessful) {
             try {
-              await recordRelationService.publishHardDeleteRecord(
-                existingRecord,
-              );
-            } catch (eventError) {
-              logger.error(
-                'Failed to publish delete event for hard-deleted record',
-                {
-                  recordId,
-                  error: eventError,
-                  requestId: req.context?.requestId,
-                },
-              );
-              // Continue despite event publishing error
+              const recordKey = existingRecord?.record?._key || recordId;
+              if (recordKey) {
+                await recordRelationService.softDeleteRecord(recordKey, userId);
+              } else {
+                logger.warn('Record key not found for soft delete after hard delete', { recordId });
+              }
+            } catch (softDeleteErr) {
+              logger.error('Soft delete (DB flagging) failed after hard delete success', {
+                recordId,
+                error: softDeleteErr,
+                requestId: req.context?.requestId,
+              });
+              // Continue: artifacts were removed; UI flagging can be retried/admin fixed
             }
 
-            // Return success response for hard delete
             res.status(200).json({
               message: 'Record permanently deleted successfully',
               meta: {
@@ -943,9 +1045,7 @@ export const deleteRecord =
           // Check if any permission has the required relationship for deletion
           const hasDeletePermission = existingRecord.permissions.some(
             (permission: RecordPermission) =>
-              ['OWNER', 'WRITER', 'FILEORGANIZER', 'READER'].includes(
-                permission.relationship,
-              ),
+              permission.relationship === 'OWNER',
           );
 
           if (!hasDeletePermission) {
@@ -992,33 +1092,45 @@ export const deleteRecord =
 
       const internalRecordId = existingRecord.record._key;
 
-      // Perform the soft delete operation for connector records
+      // Perform hard delete for connector records, then flag DB as deleted
       try {
-        await recordRelationService.softDeleteRecord(internalRecordId, userId);
-
-        logger.info('Record soft-deleted successfully', {
+        const hardDeleted = await performHardDelete(
           recordId,
-          internalRecordId,
-          userId,
-          orgId,
-          requestId: req.context?.requestId,
-        });
+          req.headers as Record<string, string>,
+          connectorBackendUrl,
+          req.context?.requestId,
+        );
 
-        res.status(200).json({
-          message: 'Record deleted successfully',
-          meta: {
+        if (hardDeleted) {
+          await recordRelationService.softDeleteRecord(internalRecordId, userId);
+
+          logger.info('Connector record hard-deleted and flagged (soft delete) successfully', {
+            recordId,
+            internalRecordId,
+            userId,
+            orgId,
             requestId: req.context?.requestId,
-            timestamp: new Date().toISOString(),
-          },
-        });
-      } catch (softDeleteError) {
-        logger.error('Soft delete operation failed', {
+          });
+
+          res.status(200).json({
+            message: 'Record permanently deleted successfully',
+            meta: {
+              requestId: req.context?.requestId,
+              timestamp: new Date().toISOString(),
+            },
+          });
+        } else {
+          // Should not reach: performHardDelete returns boolean or throws
+          throw new InternalServerError('Unknown error during connector hard delete');
+        }
+      } catch (connectorHardDeleteError: any) {
+        logger.error('Connector hard delete failed', {
           recordId,
           internalRecordId,
-          error: softDeleteError,
+          error: connectorHardDeleteError?.message || connectorHardDeleteError,
           requestId: req.context?.requestId,
         });
-        throw softDeleteError;
+        throw connectorHardDeleteError;
       }
     } catch (error: any) {
       // Log the error for debugging
@@ -1925,6 +2037,85 @@ export const resyncConnectorRecords =
       });
       next(error);
       return; // Added return statement
+    }
+  };
+
+/**
+ * Reset stuck IN_PROGRESS records to allow deletion or reprocessing
+ */
+export const resetStuckRecords =
+  (recordRelationService: RecordRelationService) =>
+  async (req: AuthenticatedUserRequest, res: Response, next: NextFunction) => {
+    try {
+      const userId = req.user?.userId;
+      const orgId = req.user?.orgId;
+      
+      if (!userId || !orgId) {
+        throw new UnauthorizedError('User authentication is required');
+      }
+
+      // Check if user has permission to perform administrative actions
+      try {
+        await recordRelationService.validateUserKbAccess(userId, orgId, [
+          'OWNER',
+        ]);
+      } catch (error) {
+        throw new ForbiddenError('Only organization owners can reset stuck records');
+      }
+
+      const { 
+        recordIds, 
+        stuckHours = 4, 
+        newStatus = 'FAILED',
+        dryRun = false 
+      } = req.body;
+
+      logger.info('Processing stuck records reset request', {
+        userId,
+        orgId,
+        recordIds: recordIds?.length || 'all',
+        stuckHours,
+        newStatus,
+        dryRun,
+        requestId: req.context?.requestId,
+      });
+
+      const result = await recordRelationService.resetStuckRecords({
+        orgId,
+        recordIds,
+        stuckHours,
+        newStatus,
+        dryRun,
+        userId,
+      });
+
+      res.status(200).json({
+        message: dryRun 
+          ? `Found ${result.affectedRecords} stuck records (dry run)`
+          : `Successfully reset ${result.affectedRecords} stuck records`,
+        data: {
+          affectedRecords: result.affectedRecords,
+          stuckThresholdHours: stuckHours,
+          newStatus,
+          dryRun,
+          recordDetails: result.recordDetails || [],
+        },
+        meta: {
+          requestId: req.context?.requestId,
+          timestamp: new Date().toISOString(),
+        },
+      });
+
+      return;
+    } catch (error: any) {
+      logger.error('Error resetting stuck records', {
+        error: error.message,
+        userId: req.user?.userId,
+        orgId: req.user?.orgId,
+        requestId: req.context?.requestId,
+      });
+      next(error);
+      return;
     }
   };
 

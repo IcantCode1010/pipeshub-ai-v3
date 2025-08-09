@@ -1,6 +1,6 @@
 services:
-  pipeshub-ai:
-    image: pipeshub-ai:latest
+  aerointel-ai:
+    image: aerointel-ai:latest
     restart: always
     build:
       context: ../../
@@ -75,8 +75,8 @@ services:
       arango:
         condition: service_started
     volumes:
-      - pipeshub_data:/data/pipeshub
-      - pipeshub_root_local:/root/.local
+      - aerointel_data:/data/pipeshub
+      - aerointel_root_local:/root/.local
 
   mongodb:
     image: mongo:8.0.6
@@ -224,9 +224,9 @@ volumes:
     driver: local
   qdrant_storage:
     driver: local
-  pipeshub_data:
+  aerointel_data:
     driver: local
-  pipeshub_root_local:
+  aerointel_root_local:
     driver: local
   ollama_models:
     driver: local

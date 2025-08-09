@@ -8,11 +8,11 @@ from arango import ArangoClient
 from app.config.configuration_service import ConfigurationService, config_node_constants
 from app.config.utils.named_constants.arangodb_constants import (
     CollectionNames,
-    DepartmentNames,
+    AircraftNames,
 )
 from app.schema.arango.documents import (
     app_schema,
-    department_schema,
+    aircraft_schema,
     file_record_schema,
     kb_schema,
     mail_record_schema,
@@ -45,7 +45,7 @@ NODE_COLLECTIONS = [
     (CollectionNames.CHANNEL_HISTORY.value, None),
     (CollectionNames.PAGE_TOKENS.value, None),
     (CollectionNames.APPS.value, app_schema),
-    (CollectionNames.DEPARTMENTS.value, department_schema),
+    (CollectionNames.AIRCRAFT.value, aircraft_schema),
     (CollectionNames.CATEGORIES.value, None),
     (CollectionNames.LANGUAGES.value, None),
     (CollectionNames.TOPICS.value, None),
@@ -60,8 +60,6 @@ EDGE_COLLECTIONS = [
     (CollectionNames.IS_OF_TYPE.value, is_of_type_schema),
     (CollectionNames.RECORD_RELATIONS.value, record_relations_schema),
     (CollectionNames.USER_DRIVE_RELATION.value, user_drive_relation_schema),
-    (CollectionNames.BELONGS_TO_DEPARTMENT.value, basic_edge_schema),
-    (CollectionNames.ORG_DEPARTMENT_RELATION.value, basic_edge_schema),
     (CollectionNames.BELONGS_TO.value, belongs_to_schema),
     (CollectionNames.PERMISSIONS.value, permissions_schema),
     (CollectionNames.ORG_APP_RELATION.value, basic_edge_schema),
@@ -72,6 +70,7 @@ EDGE_COLLECTIONS = [
     (CollectionNames.INTER_CATEGORY_RELATIONS.value, basic_edge_schema),
     (CollectionNames.BELONGS_TO_KNOWLEDGE_BASE.value, belongs_to_schema),
     (CollectionNames.PERMISSIONS_TO_KNOWLEDGE_BASE.value, permissions_schema),
+    (CollectionNames.BELONGS_TO_AIRCRAFT.value, basic_edge_schema),
 ]
 
 class BaseArangoService:
@@ -190,14 +189,14 @@ class BaseArangoService:
                             ],
                         },
                         {
-                            "edge_collection": CollectionNames.ORG_DEPARTMENT_RELATION.value,
+                            "edge_collection": CollectionNames.ORG_AIRCRAFT_RELATION.value,
                             "from_vertex_collections": [CollectionNames.ORGS.value],
-                            "to_vertex_collections": [CollectionNames.DEPARTMENTS.value],
+                            "to_vertex_collections": [CollectionNames.AIRCRAFT.value],
                         },
                         {
-                            "edge_collection": CollectionNames.BELONGS_TO_DEPARTMENT.value,
+                            "edge_collection": CollectionNames.BELONGS_TO_AIRCRAFT.value,
                             "from_vertex_collections": [CollectionNames.RECORDS.value],
-                            "to_vertex_collections": [CollectionNames.DEPARTMENTS.value],
+                            "to_vertex_collections": [CollectionNames.AIRCRAFT.value],
                         },
                         {
                             "edge_collection": CollectionNames.BELONGS_TO_CATEGORY.value,
@@ -269,11 +268,11 @@ class BaseArangoService:
 
                 self.logger.info("✅ Collections initialized successfully")
 
-                # Initialize departments
+                # Initialize aircraft
                 try:
-                    await self._initialize_departments()
+                    await self._initialize_aircraft()
                 except Exception as e:
-                    self.logger.error("❌ Error initializing departments: %s", str(e))
+                    self.logger.error("❌ Error initializing aircraft: %s", str(e))
                     raise
 
                 return True
@@ -291,35 +290,45 @@ class BaseArangoService:
                 self._collections[collection] = None
             return False
 
-    async def _initialize_departments(self) -> None:
-        """Initialize departments collection with predefined department types"""
-        departments = [
+    async def _initialize_aircraft(self) -> None:
+        """Initialize aircraft collection with predefined aircraft types"""
+        aircraft = [
             {
                 "_key": str(uuid.uuid4()),
-                "departmentName": dept.value,
+                "aircraftName": air.value,
                 "orgId": None,
             }
-            for dept in DepartmentNames
+            for air in AircraftNames
         ]
 
-        # Bulk insert departments if not already present
-        existing_department_names = set(
-            doc["departmentName"]
-            for doc in self._collections[CollectionNames.DEPARTMENTS.value].all()
+        # Bulk insert aircraft if not already present
+        existing_aircraft_names = set(
+            doc["aircraftName"]
+            for doc in self._collections[CollectionNames.AIRCRAFT.value].all()
         )
 
-        new_departments = [
-            dept
-            for dept in departments
-            if dept["departmentName"] not in existing_department_names
+        new_aircraft = [
+            air
+            for air in aircraft
+            if air["aircraftName"] not in existing_aircraft_names
         ]
 
-        if new_departments:
-            self.logger.info(f"🚀 Inserting {len(new_departments)} departments")
-            self._collections[CollectionNames.DEPARTMENTS.value].insert_many(
-                new_departments
+        if new_aircraft:
+            self.logger.info(f"🚀 Inserting {len(new_aircraft)} aircraft")
+            self._collections[CollectionNames.AIRCRAFT.value].insert_many(
+                new_aircraft
             )
-            self.logger.info("✅ Departments initialized successfully")
+            self.logger.info("✅ Aircraft initialized successfully")
+
+    async def get_aircraft(self, org_id: str) -> list:
+        """Get all aircraft for an organization"""
+        try:
+            # For now, return all aircraft. Later this could be org-specific
+            aircraft_docs = list(self._collections[CollectionNames.AIRCRAFT.value].all())
+            return [doc["aircraftName"] for doc in aircraft_docs]
+        except Exception as e:
+            self.logger.error(f"❌ Error getting aircraft for org {org_id}: {str(e)}")
+            return []
 
     async def disconnect(self) -> bool | None:
         """Disconnect from ArangoDB"""

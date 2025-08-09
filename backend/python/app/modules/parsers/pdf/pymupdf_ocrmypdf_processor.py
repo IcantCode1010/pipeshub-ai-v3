@@ -20,21 +20,48 @@ class PyMuPDFOCRStrategy(OCRStrategy):
         self._processed_pages = {}
         self._needs_ocr = False
         self.document_analysis_result = None
-        self.nlp = self._create_custom_tokenizer(spacy.load("en_core_web_sm"))
+        try:
+            nlp_model = spacy.load("en_core_web_sm")
+        except Exception as e:
+            self.logger.warning(f"spaCy model 'en_core_web_sm' not available, falling back to blank 'en': {e}")
+            nlp_model = spacy.blank("en")
+        self.nlp = self._create_custom_tokenizer(nlp_model)
         self.ocr_pdf_content = None
 
     async def load_document(self, content: bytes) -> None:
         """Load and analyze document"""
         self.logger.info("🔄 Starting document load...")
 
+        # Check for severe corruption before attempting to load
+        if self._is_severely_corrupted(content):
+            self.logger.warning("🚨 Severely corrupted PDF detected - skipping OCR attempts")
+            # Create minimal document structure for corrupted PDFs
+            self.doc = None
+            self._needs_ocr = False
+            self.ocr_pdf_content = None
+            self.document_analysis_result = self._create_minimal_structure()
+            self.logger.info("✅ Created minimal structure for corrupted PDF")
+            return
+
         # Load with PyMuPDF first
         self.logger.debug("📄 Initial PyMuPDF load")
         temp_doc = fitz.open(stream=content, filetype="pdf")
 
-        # Check if any page needs OCR
-        self.logger.debug("🔍 Checking if document needs OCR")
-        needs_ocr = any(self.needs_ocr(page) for page in temp_doc)
+        # Check which pages need OCR
+        self.logger.debug("🔍 Checking which pages need OCR")
+        pages_needing_ocr = [i + 1 for i, page in enumerate(temp_doc) if self.needs_ocr(page)]
+        total_pages = len(temp_doc)
+        # Cap OCR effort to avoid runaway processing on very large PDFs
+        max_ocr_pages = min(max(1, int(total_pages * 0.2)), 50)
+        if len(pages_needing_ocr) > max_ocr_pages:
+            self.logger.info(
+                f"🔧 Capping OCR pages from {len(pages_needing_ocr)} to {max_ocr_pages} "
+                f"(20% of {total_pages} pages, max 50)"
+            )
+            pages_needing_ocr = pages_needing_ocr[:max_ocr_pages]
+        needs_ocr = len(pages_needing_ocr) > 0
         self._needs_ocr = needs_ocr
+        self.logger.debug(f"📊 OCR pages: {pages_needing_ocr} (total {len(pages_needing_ocr)})")
         self.logger.debug(f"📊 OCR need determination: {needs_ocr}")
 
         if needs_ocr:
@@ -52,17 +79,24 @@ class PyMuPDFOCRStrategy(OCRStrategy):
                     temp_in.flush()
 
                     self.logger.debug("🔄 Running OCRmyPDF")
+                    # Use force_ocr instead of skip_text to avoid Ghostscript issues
+                    # This will OCR all pages regardless of existing text
                     ocrmypdf.ocr(
                         temp_in.name,
                         temp_out.name,
                         language=self.language,
                         output_type="pdf",
-                        force_ocr=True,
-                        optimize=0,
+                        force_ocr=True,  # Force OCR to avoid Ghostscript 10.0.0 issues
+                        optimize=1,
                         progress_bar=False,
                         deskew=True,
                         clean=True,
                         quiet=True,
+                        rotate_pages=True,
+                        rotate_pages_threshold=15.0,
+                        tesseract_timeout=60,
+                        jobs=min(os.cpu_count() or 2, 4),
+                        pages=",".join(map(str, pages_needing_ocr)),
                     )
 
                     self.logger.debug("📥 Loading OCR-processed PDF")
@@ -115,9 +149,102 @@ class PyMuPDFOCRStrategy(OCRStrategy):
             self.doc = temp_doc
             self.ocr_pdf_content = None
 
-        self.logger.debug("🔄 Pre-processing document to match Azure's structure")
-        self.document_analysis_result = self._preprocess_document()
-        self.logger.info(f"✅ Document loaded with {len(self.doc)} pages")
+        if self.doc:
+            self.logger.debug("🔄 Pre-processing document to match Azure's structure")
+            self.document_analysis_result = self._preprocess_document()
+            self.logger.info(f"✅ Document loaded with {len(self.doc)} pages")
+        else:
+            self.logger.warning("⚠️ No document loaded - using minimal structure")
+
+    def _is_severely_corrupted(self, content: bytes) -> bool:
+        """Quick check for severe PDF corruption that would cause hangs"""
+        try:
+            # Basic PDF structure check
+            if not content.startswith(b'%PDF-'):
+                return True
+            
+            # Try a quick parse with PyMuPDF with timeout
+            import signal
+            import fitz
+            
+            def timeout_handler(signum, frame):
+                raise TimeoutError("PDF parsing timeout")
+            
+            # Set a 2-second timeout for the test
+            try:
+                # Note: signal.alarm only works on Unix-like systems
+                # For Windows, we'll do a simpler check
+                import platform
+                if platform.system() != 'Windows':
+                    signal.signal(signal.SIGALRM, timeout_handler)
+                    signal.alarm(2)
+                
+                test_doc = fitz.open(stream=content[:min(len(content), 1024*1024)], filetype="pdf")
+                # Try to access first page
+                if len(test_doc) > 0:
+                    _ = test_doc[0].get_text()[:100]  # Just get first 100 chars
+                test_doc.close()
+                
+                if platform.system() != 'Windows':
+                    signal.alarm(0)  # Cancel alarm
+                
+                return False
+            except Exception as e:
+                self.logger.warning(f"🚨 PDF corruption check failed: {str(e)}")
+                # Check for specific MuPDF syntax errors in the exception
+                error_msg = str(e).lower()
+                if 'syntax error' in error_msg or 'unknown keyword' in error_msg:
+                    return True
+                return True
+                
+        except Exception as e:
+            self.logger.error(f"❌ Error in corruption check: {str(e)}")
+            return False
+
+    def _create_minimal_structure(self) -> Dict[str, Any]:
+        """Create minimal document structure for severely corrupted PDFs"""
+        return {
+            "pages": [{
+                "page_number": 1,
+                "width": 612,
+                "height": 792,
+                "unit": "pt",
+                "lines": [],
+                "words": [],
+                "tables": [],
+            }],
+            "lines": [],
+            "paragraphs": [{
+                "content": "[Document is severely corrupted and cannot be processed]",
+                "page_number": 1,
+                "block_number": 0,
+                "bounding_box": [
+                    {"x": 0.1, "y": 0.1},
+                    {"x": 0.9, "y": 0.1},
+                    {"x": 0.9, "y": 0.2},
+                    {"x": 0.1, "y": 0.2},
+                ],
+                "spans": [],
+                "words": [],
+                "metadata": {"font": None, "size": None, "color": None}
+            }],
+            "sentences": [{
+                "content": "[Document is severely corrupted and cannot be processed]",
+                "page_number": 1,
+                "block_number": 0,
+                "bounding_box": [
+                    {"x": 0.1, "y": 0.1},
+                    {"x": 0.9, "y": 0.1},
+                    {"x": 0.9, "y": 0.2},
+                    {"x": 0.1, "y": 0.2},
+                ],
+                "block_text": "[Document is severely corrupted and cannot be processed]",
+                "block_type": 0,
+                "metadata": {"font": None, "size": None, "color": None}
+            }],
+            "tables": [],
+            "key_value_pairs": [],
+        }
 
     @Language.component("custom_sentence_boundary")
     def custom_sentence_boundary(doc) -> Doc:
@@ -578,9 +705,14 @@ class PyMuPDFOCRStrategy(OCRStrategy):
     async def extract_text(self) -> Dict[str, Any]:
         """Extract text and layout information"""
         self.logger.debug("📊 Starting text extraction")
-        if not self.doc or not self.document_analysis_result:
+        if not self.document_analysis_result:
             self.logger.error("❌ Document not loaded")
             raise ValueError("Document not loaded. Call load_document first.")
+        
+        # Handle corrupted documents
+        if not self.doc:
+            self.logger.warning("⚠️ Returning minimal structure for corrupted document")
+            return self.document_analysis_result
 
         self.logger.debug("📊 Returning document analysis result:")
         self.logger.debug(f"- Pages: {len(self.document_analysis_result['pages'])}")
